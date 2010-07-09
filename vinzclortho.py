@@ -1,6 +1,8 @@
-import store
 import functools
+import cPickle as pickle
+import store
 import executor
+from vectorclock import VectorClock
 
 class Partition(object):
     def __init__(self, partitionid, persistent):
@@ -23,7 +25,10 @@ class VinzClortho(object):
     def __init__(self, addr, persistent):
         self.address = addr
         self._partition = Partition(0, persistent)
-        self._members = [addr]
+        vc = VectorClock()
+        vc.increment(self.address)
+        self._ring = [addr]
+        self._metadata = (vc, {"ring": self._ring})
 
     def do_GET(self, path, rfile, oncomplete):
         try:
@@ -32,15 +37,14 @@ class VinzClortho(object):
                 assert(len(p) == 3)
                 key = p[2]
                 self._partition.get(key, oncomplete)
-            elif p[1] == "_members":
+            elif p[1] == "_metadata":
                 assert(len(p) == 2)
-                oncomplete((str(self._members), None))
+                oncomplete((pickle.dumps(self._metadata), None))
             else:
                 oncomplete((None, KeyError(path)))
         except Exception as e:
             oncomplete((None, e))
             
-
     def do_PUT(self, path, rfile, oncomplete):
         try:
             p = path.split("/")
@@ -48,20 +52,10 @@ class VinzClortho(object):
                 assert(len(p) == 3)
                 key = p[2]
                 self._partition.put(key, rfile.read(), oncomplete)
-            elif p[1] == "_members":
-                assert(len(p) == 2)
-                err = None
-                try:
-                    # this is stupid, I know!
-                    self._members = eval(rfile.read())
-                except Exception as e:
-                    err = e
-                oncomplete((None, err))
             else:
                 oncomplete((None, KeyError(path)))
         except Exception as e:
             oncomplete((None, e))
-
 
     def do_DELETE(self, path, rfile, oncomplete):
         try:
