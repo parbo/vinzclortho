@@ -5,6 +5,8 @@ class VectorClock(object):
     """A vector clock implementation. Each node's clock is stored as a 
     tuple: (clock, timestamp) in a dict with name as key. This means
     that the key needs to be hashable.
+
+    Inspired by: http://github.com/cliffmoon/dynomite/blob/master/elibs/vector_clock.erl
     """
     prune_size = 10
     prune_age = 3600.0
