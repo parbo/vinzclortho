@@ -75,6 +75,10 @@ class AsyncHTTPClient(asyncore.dispatcher_with_send):
         self.consumer.close()
         self.close()
 
+def request(requests):
+    clients = [AsyncHTTPClient(host, port, path) for host, port, path in requests]
+    asyncore.loop()
+    return [c.response for c in clients]
 
 if __name__=="__main__":
     import optparse
