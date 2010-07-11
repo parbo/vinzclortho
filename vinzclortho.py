@@ -72,3 +72,15 @@ class VinzClortho(object):
     do_PUSH = do_PUT
     
         
+if __name__ == '__main__':
+    parser = optparse.OptionParser()
+    parser.add_option("-a", "--address", dest="address", default="localhost",
+                      help="Bind to ADDRESS", metavar="ADDRESS")
+    parser.add_option("-p", "--port", dest="port", action="store", type="int", default=8080,
+                      help="Bind to PORT", metavar="PORT")
+    (options, args) = parser.parse_args()    
+
+    server = AsyncHTTPServer((options.address, options.port))
+    print 'Starting server, use <Ctrl-C> to stop'
+    asyncore.loop(use_poll=True)
+    sys.exit(0)
