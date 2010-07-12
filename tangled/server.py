@@ -5,9 +5,8 @@ import socket
 import cStringIO
 import threading
 import functools
+import urlparse
 import optparse
-
-import vinzclortho
 
 __version__ = "0.1"
 
@@ -15,13 +14,30 @@ def raise_error(e):
     if e is not None:
         raise e
 
+class Request(object):
+    def __init__(self, method, path, headers, data, groups):
+        self.method = method
+        self.path = path
+        self.headers = headers
+        self.data = data
+        self.groups = groups
+
+
+class Response(object):
+    def __init__(self, code, headers, data):
+        self.code
+        self.headers = headers
+        self.data = data
+
+
 class AsyncHTTPRequestHandler(asynchat.async_chat, BaseHTTPRequestHandler):
     """An asynchronous HTTP request handler inspired somewhat by the 
     http://code.activestate.com/recipes/440665-asynchronous-http-server/
     recipe.
     """
 
-    server_version = "VinzClortho/" + __version__
+    server_version = "Tangled/" + __version__
+    methods = ["HEAD", "GET", "POST", "PUT", "DELETE", "TRACE", "OPTIONS", "CONNECT", "PATCH"]
 
     class Pusher(object):
         def __init__(self, obj):
@@ -34,7 +50,6 @@ class AsyncHTTPRequestHandler(asynchat.async_chat, BaseHTTPRequestHandler):
         self.client_address = addr
         self.connection = conn
         self.server = server
-        self.keymaster = server.keymaster
         # set the terminator : when it is received, this means that the
         # http request is complete ; control will be passed to
         # self.found_terminator
@@ -50,9 +65,6 @@ class AsyncHTTPRequestHandler(asynchat.async_chat, BaseHTTPRequestHandler):
     def collect_incoming_data(self,data):
         self.incoming.append(data)
 
-    def handle_junk(self):
-        pass
-
     def create_rfile(self):
         self.rfile = cStringIO.StringIO(''.join(self.incoming))
         self.incoming = []
@@ -67,6 +79,9 @@ class AsyncHTTPRequestHandler(asynchat.async_chat, BaseHTTPRequestHandler):
         # control will be passed to a new found_terminator
         self.found_terminator = self.handle_request_data
     
+    def handle_junk(self):
+        pass
+
     def handle_request_data(self):
         """Called when a request body has been read"""
         self.create_rfile()
@@ -78,13 +93,24 @@ class AsyncHTTPRequestHandler(asynchat.async_chat, BaseHTTPRequestHandler):
 
     def handle_request(self):
         """Dispatch the request to a handler"""
-        try:
-            handler = getattr(self, "do_" + self.command)
-            handler()
-        except AttributeError:
-            self.send_response(501)
-            self.end_headers()        
-            self.close_when_done()
+        for r, h in self.urlhandlers:
+            m = re.match(self.path)
+            if m is not None:
+                try:
+                    handler = getattr(h, "do_" + self.command)
+                    handler(Request(self.commaand, self.path, self.headers, self.rfile.read(), m.groups()))
+                    return                            
+                except AttributeError:
+                    # Method not supported
+                    self.send_error(405)
+                    self.send_header("Allow", [method for method in self.methods if hasattr(h, "do_" + method)])
+                    self.end_headers()        
+                    self.close_when_done()
+                return
+        # No match found, send 404
+        self.send_error(404)
+        self.end_headers()        
+        self.close_when_done()
 
     def handle_request_line(self):
         """Called when the http request line and headers have been received"""
@@ -105,45 +131,18 @@ class AsyncHTTPRequestHandler(asynchat.async_chat, BaseHTTPRequestHandler):
     def deferred(self, func):
         return functools.partial(self.trigger.pull_trigger, func)
 
-    def do_request(self):
-        do = getattr(self.keymaster, "do_" + self.command)
-        try:
-            do(self.path, self.rfile, self.deferred(self.complete_request))
-        except AttributeError:
-            self.send_response(501)
-            self.end_headers()        
-            self.close_when_done()
+    def request_handled(self, response):
+        self.send_response(response.code)
+        for k, v in response.headers.items():
+            self.send_header(k, v)
+        self.end_headers()
+        if self.data:
+            self.push(data)
+        self.close_when_done()
 
-    def complete_request(self, result):
-        try:
-            value, e = result
-            raise_error(e)
-            self.send_response(200)
-            self.end_headers()
-            if value is not None:
-                self.push(value)
-        except KeyError:
-            self.send_response(404)
-            self.end_headers()
-        except:
-            raise
-            self.send_response(501)
-            self.end_headers()
-        finally:
-            self.close_when_done()
-
-    def do_GET(self):
-        self.do_request()
-
-    def do_PUT(self):
-        self.do_request()
-
-    def do_POST(self):
-        self.do_request()
-
-    def do_DELETE(self):
-        self._do_request()
-
+    def request_error(self, error):
+        self.send_error(error)
+        self.close_when_done()
 
 def set_reuse_addr(s):
     # try to re-use a server port if possible
@@ -230,14 +229,15 @@ class AsyncHTTPServer(asyncore.dispatcher):
     """Cobbled together from various sources, most of them state that they 
     copied from the Medusa http server.. 
     """
-    def __init__(self, keymaster):
-        self.keymaster = keymaster
+    def __init__(self, address, urlhandlers):
         self.trigger = Trigger()
         self.handler = AsyncHTTPRequestHandler
+        self.urlhandlers = [(re.compile(r), h) for r, h in urlhandlers]
+        self.address = address
         asyncore.dispatcher.__init__(self)
         self.create_socket(socket.AF_INET, socket.SOCK_STREAM)
         self.set_reuse_addr()
-        self.bind(self.keymaster.address)
+        self.bind()
         self.listen(5)
 
     def handle_accept(self):
@@ -253,16 +253,3 @@ class AsyncHTTPServer(asyncore.dispatcher):
         # on the incoming connection
         self.handler(conn, addr, self)
 
-if __name__ == '__main__':
-    parser = optparse.OptionParser()
-    parser.add_option("-a", "--address", dest="address", default="localhost",
-                      help="Bind to ADDRESS", metavar="ADDRESS")
-    parser.add_option("-p", "--port", dest="port", action="store", type="int", default=8080,
-                      help="Bind to PORT", metavar="PORT")
-    (options, args) = parser.parse_args()    
-
-    keymaster = vinzclortho.VinzClortho((options.address, options.port), True)
-    server = AsyncHTTPServer(keymaster)
-    print 'Starting Vinz Clortho, use <Ctrl-C> to stop'
-    asyncore.loop()
-    sys.exit(0)
