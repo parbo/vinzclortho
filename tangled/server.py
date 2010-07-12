@@ -14,6 +14,10 @@ def raise_error(e):
     if e is not None:
         raise e
 
+class Deferred(object):
+    def __init__(self):
+        self._backs = []
+
 class Request(object):
     def __init__(self, method, path, headers, data, groups):
         self.method = method
