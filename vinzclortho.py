@@ -1,25 +1,78 @@
 import functools
 import cPickle as pickle
+import optparse
 import store
-import executor
+import tangled.core as tc
+import tangled.server as ts
 from vectorclock import VectorClock
 
-class Partition(object):
+class Partition(tc.Worker):
     def __init__(self, partitionid, persistent):
+        tc.Worker.__init__(self)
         if persistent:
             self._store = store.SQLiteStore("vc_store_" + str(partitionid) + ".db")
         else:
             self._store = store.DictStore()
-        self._executor = executor.Executor()
+        self.start()
 
-    def get(self, key, oncomplete):
-        self._executor.defer(functools.partial(self._store.get, key), oncomplete)
+    def get(self, key):
+        return self.defer(functools.partial(self._store.get, key))
 
-    def put(self, key, value, oncomplete):
-        self._executor.defer(functools.partial(self._store.put, key, value), oncomplete)
+    def put(self, key, value):
+        return self.defer(functools.partial(self._store.put, key, value))
     
-    def delete(self, key, oncomplete):
-        self._executor.defer(functools.partial(self._store.delete, key), oncomplete)
+    def delete(self, key):
+        return self.defer(functools.partial(self._store.delete, key))
+
+class LocalStoreHandler(object):
+    def __init__(self, context):
+        self.context = context
+
+    def _ok(self, result):
+        self.response.callback(ts.Response(200, None, result))
+
+    def _error(self, result):
+        self.response.callback(ts.Response(404))
+
+    def do_GET(self, request):
+        key = request.groups[0]
+        self.data = self.context._partition.get(key)
+        self.data.add_callbacks(self._ok, self._error)
+        self.response = tc.Deferred()
+        return self.response
+            
+    def do_PUT(self, request):
+        key = request.groups[0]
+        self.data = self.context._partition.put(key, request.data)
+        self.data.add_callbacks(self._ok, self._error)
+        self.response = tc.Deferred()
+        return self.response
+            
+    def do_DELETE(self, request):
+        key = request.groups[0]
+        self.data = self.context._partition.delete(key)
+        self.data.add_callbacks(self._ok, self._error)
+        self.response = tc.Deferred()
+        return self.response
+
+    do_PUSH = do_PUT
+
+
+class MetaDataHandler(object):
+    def __init__(self, context):
+        self.context = context
+
+    def _ok(self, result):
+        self.response.callback(ts.Response(200, None, result))
+
+    def _error(self, result):
+        self.response.callback(ts.Response(404))
+
+    def do_GET(self, request):
+        d = tc.Deferred()
+        d.callback(ts.Response(200, None, pickle.dumps(self.context._metadata)))
+        return d
+   
 
 class VinzClortho(object):
     def __init__(self, addr, persistent):
@@ -29,47 +82,9 @@ class VinzClortho(object):
         vc.increment(self.address)
         self._ring = [addr]
         self._metadata = (vc, {"ring": self._ring})
-
-    def do_GET(self, path, rfile, oncomplete):
-        try:
-            p = path.split("/")
-            if p[1] == "_localstore":
-                assert(len(p) == 3)
-                key = p[2]
-                self._partition.get(key, oncomplete)
-            elif p[1] == "_metadata":
-                assert(len(p) == 2)
-                oncomplete((pickle.dumps(self._metadata), None))
-            else:
-                oncomplete((None, KeyError(path)))
-        except Exception as e:
-            oncomplete((None, e))
-            
-    def do_PUT(self, path, rfile, oncomplete):
-        try:
-            p = path.split("/")
-            if p[1] == "_localstore":
-                assert(len(p) == 3)
-                key = p[2]
-                self._partition.put(key, rfile.read(), oncomplete)
-            else:
-                oncomplete((None, KeyError(path)))
-        except Exception as e:
-            oncomplete((None, e))
-
-    def do_DELETE(self, path, rfile, oncomplete):
-        try:
-            p = path.split("/")
-            if p[1] == "_localstore":
-                assert(len(p) == 3)
-                key = p[2]
-                self._partition.delete(key, oncomplete)
-            else:
-                oncomplete((None, KeyError(path)))
-        except Exception as e:
-            oncomplete((None, e))
-
-    do_PUSH = do_PUT
+        self._server = ts.AsyncHTTPServer(self.address, self,
+                                          [(r"/_localstore/(.*)", LocalStoreHandler),
+                                           (r"/_metadata", MetaDataHandler)])
     
         
 if __name__ == '__main__':
@@ -80,7 +95,6 @@ if __name__ == '__main__':
                       help="Bind to PORT", metavar="PORT")
     (options, args) = parser.parse_args()    
 
-    server = AsyncHTTPServer((options.address, options.port))
     print 'Starting server, use <Ctrl-C> to stop'
-    asyncore.loop(use_poll=True)
-    sys.exit(0)
+    vc = VinzClortho((options.address, options.port), True)
+    tc.loop()

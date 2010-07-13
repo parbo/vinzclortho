@@ -3,20 +3,9 @@ import asynchat
 import asyncore
 import socket
 import cStringIO
-import threading
-import functools
-import urlparse
-import optparse
+import re
 
 __version__ = "0.1"
-
-def raise_error(e):
-    if e is not None:
-        raise e
-
-class Deferred(object):
-    def __init__(self):
-        self._backs = []
 
 class Request(object):
     def __init__(self, method, path, headers, data, groups):
@@ -28,10 +17,10 @@ class Request(object):
 
 
 class Response(object):
-    def __init__(self, code, headers, data):
-        self.code
-        self.headers = headers
-        self.data = data
+    def __init__(self, code=None, headers=None, data=None):
+        self.code = code or 200
+        self.headers = headers or {}
+        self.data = data or ""
 
 
 class AsyncHTTPRequestHandler(asynchat.async_chat, BaseHTTPRequestHandler):
@@ -54,6 +43,7 @@ class AsyncHTTPRequestHandler(asynchat.async_chat, BaseHTTPRequestHandler):
         self.client_address = addr
         self.connection = conn
         self.server = server
+        self.urlhandlers = self.server.urlhandlers
         # set the terminator : when it is received, this means that the
         # http request is complete ; control will be passed to
         # self.found_terminator
@@ -64,7 +54,6 @@ class AsyncHTTPRequestHandler(asynchat.async_chat, BaseHTTPRequestHandler):
         self.found_terminator = self.handle_request_line
         self.request_version = "HTTP/1.1"
         self.code = None
-        self.trigger = self.server.trigger
 
     def collect_incoming_data(self,data):
         self.incoming.append(data)
@@ -95,19 +84,30 @@ class AsyncHTTPRequestHandler(asynchat.async_chat, BaseHTTPRequestHandler):
         # Actually handle the request
         self.handle_request()
 
+    def finish_request(self, response):
+        self.send_response(response.code)
+        for k, v in response.headers.items():
+            self.send_header(k, v)
+        self.end_headers()
+        if response.data:
+            self.push(response.data)
+        self.close_when_done()
+
     def handle_request(self):
         """Dispatch the request to a handler"""
-        for r, h in self.urlhandlers:
-            m = re.match(self.path)
+        for r, cls in self.urlhandlers:
+            m = re.match(r, self.path)
             if m is not None:
                 try:
+                    h = cls(self.server.context)
                     handler = getattr(h, "do_" + self.command)
-                    handler(Request(self.commaand, self.path, self.headers, self.rfile.read(), m.groups()))
-                    return                            
+                    d = handler(Request(self.command, self.path, self.headers, self.rfile.read(), m.groups()))
+                    d.add_callback(self.finish_request)
                 except AttributeError:
+                    raise
                     # Method not supported
+                    self.send_header("Allow", ", ".join([method for method in self.methods if hasattr(h, "do_" + method)]))
                     self.send_error(405)
-                    self.send_header("Allow", [method for method in self.methods if hasattr(h, "do_" + method)])
                     self.end_headers()        
                     self.close_when_done()
                 return
@@ -132,9 +132,6 @@ class AsyncHTTPRequestHandler(asynchat.async_chat, BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         pass
 
-    def deferred(self, func):
-        return functools.partial(self.trigger.pull_trigger, func)
-
     def request_handled(self, response):
         self.send_response(response.code)
         for k, v in response.headers.items():
@@ -148,100 +145,19 @@ class AsyncHTTPRequestHandler(asynchat.async_chat, BaseHTTPRequestHandler):
         self.send_error(error)
         self.close_when_done()
 
-def set_reuse_addr(s):
-    # try to re-use a server port if possible
-    try:
-        s.setsockopt(
-            socket.SOL_SOCKET, socket.SO_REUSEADDR,
-            s.getsockopt(socket.SOL_SOCKET,
-                         socket.SO_REUSEADDR) | 1
-            )
-    except socket.error:
-        pass
-
-class Trigger(asyncore.dispatcher):
-    """Used to trigger the asyncore event loop with external stuff,
-    also from Medusa"""
-
-    def __init__(self):
-        a = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        w = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        set_reuse_addr(a)
-        set_reuse_addr(w)
-        
-        # set TCP_NODELAY to true to avoid buffering
-        w.setsockopt(socket.IPPROTO_TCP, 1, 1)
-        
-        # tricky: get a pair of connected sockets
-        host='127.0.0.1'
-        port=19999
-        while 1:
-            try:
-                self.address = (host, port)
-                a.bind(self.address)
-                break
-            except:
-                if port <= 19950:
-                    raise 'Bind Error', 'Cannot bind trigger!'
-                port = port - 1
-                
-        a.listen(1)
-        w.setblocking(0)
-        try:
-            w.connect(self.address)
-        except:
-            pass
-        r, addr = a.accept()
-        a.close()
-        w.setblocking(1)
-        self.trigger = w
-
-        self.lock = threading.Lock()
-        self.thunks = []
-        
-        asyncore.dispatcher.__init__(self, r)
-        
-    def readable(self):
-        return 1
-
-    def writable(self):
-        return 0
-
-    def handle_connect(self):
-        pass
-
-    def pull_trigger(self, thunk, params):
-        if thunk:
-            try:
-                self.lock.acquire()
-                self.thunks.append((thunk, params))
-            finally:
-                self.lock.release()
-                self.trigger.send('x')
-
-    def handle_read(self):
-        self.recv(8192)
-        try:
-            self.lock.acquire()
-            for thunk, params in self.thunks:
-                thunk(params)
-            self.thunks = []
-        finally:
-            self.lock.release()
 
 class AsyncHTTPServer(asyncore.dispatcher):
     """Cobbled together from various sources, most of them state that they 
     copied from the Medusa http server.. 
     """
-    def __init__(self, address, urlhandlers):
-        self.trigger = Trigger()
-        self.handler = AsyncHTTPRequestHandler
+    def __init__(self, address, context, urlhandlers):
+        self.context = context
         self.urlhandlers = [(re.compile(r), h) for r, h in urlhandlers]
         self.address = address
         asyncore.dispatcher.__init__(self)
         self.create_socket(socket.AF_INET, socket.SOCK_STREAM)
         self.set_reuse_addr()
-        self.bind()
+        self.bind(self.address)
         self.listen(5)
 
     def handle_accept(self):
@@ -255,5 +171,4 @@ class AsyncHTTPServer(asyncore.dispatcher):
             return
         # creates an instance of the handler class to handle the request/response
         # on the incoming connection
-        self.handler(conn, addr, self)
-
+        AsyncHTTPRequestHandler(conn, addr, self)
