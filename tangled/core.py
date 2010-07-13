@@ -11,6 +11,16 @@ import select
 
 __version__ = "0.1"
 
+def succeed(r):
+    d = Deferred()
+    d.callback(r)
+    return d
+
+def fail(r):
+    d = Deferred()
+    d.callback(r)
+    return d
+
 class Worker(threading.Thread):
     def __init__(self):
         threading.Thread.__init__(self, target=self._runner)
@@ -75,6 +85,7 @@ class Deferred(object):
             while self.callbacks:
                 try:
                     cb, eb = self.callbacks.pop(0)
+                    print cb, eb, self.result
                     if isinstance(self.result, Failure):
                         cb = eb
                     self.result = cb(self.result)
@@ -85,6 +96,7 @@ class Deferred(object):
                         # available
                         self.add_both(self._continue)
                 except:
+                    raise
                     self.result = Failure()
 
     def add_callback(self, cb):
@@ -261,13 +273,18 @@ class Reactor(object):
             poll_fun = asyncore.poll
 
         while asyncore.socket_map:
-            timeout = self.timeout() or 0.0
+            timeout = self.timeout()
             poll_fun(timeout, asyncore.socket_map)
             # check expired timeouts
             print "checking timeouts"
             t = time.time()
-            while self._pending_calls[0][0] < t:
-                timeout, func = heapq.heappop(self._pending_calls)
-                func()
+            while self._pending_calls:
+                timeout, func = self._pending_calls[0]
+                if timeout < t:
+                    func()
+                    heapq.heappop(self._pending_calls)
+                else:
+                    # No timeout
+                    break
         print "exit loop"
 

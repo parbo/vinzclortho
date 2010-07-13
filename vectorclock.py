@@ -17,10 +17,15 @@ class VectorClock(object):
         else:
             self._clocks = {}
 
+    def __repr__(self):
+        return "VectorClock(%s)"%repr(self._clocks)
+
     def __str__(self):
+        s = []
         for k, v in self._clocks:
             t, c = v
-            print k, v, "(%f)" % t
+            s.append("%s, %s, (%f)" % (k, v, t))
+        return "\n".join(s)
 
     def clone(self):
         return VectorClock(dict(self._clocks))

@@ -5,6 +5,7 @@ import random
 import platform
 import store
 import tangled.core as tc
+import tangled.client as client
 import tangled.server as ts
 from vectorclock import VectorClock
 
@@ -71,10 +72,13 @@ class MetaDataHandler(object):
         self.response.callback(ts.Response(404))
 
     def do_GET(self, request):
-        d = tc.Deferred()
-        d.callback(ts.Response(200, None, pickle.dumps(self.context._metadata)))
-        return d
+        print "metadata requested"
+        return tc.succeed(ts.Response(200, None, pickle.dumps(self.context._metadata)))
    
+    def do_PUT(self, request):
+        print "metadata submitted"
+        self.context.update_meta(pickle.loads(request.data))
+        return tc.succeed(ts.Response(200, None, None))
 
 class VinzClortho(object):
     gossip_interval=30.0
@@ -83,34 +87,89 @@ class VinzClortho(object):
         self.address = split_str_addr(addr)       
         print self.address
         self._partition = Partition(0, persistent)
-        vc = VectorClock()
-        vc.increment(platform.node())
-        self._ring = [self.address]
-        if join:
-            self._ring.append(split_str_addr(join))
-        self._metadata = (vc, {"ring": self._ring})
+        self._metadata = None
+        if join:         
+            self.join = join
+            self.join_ring(join)
+        else:
+            self.create_ring()
         self._server = ts.AsyncHTTPServer(self.address, self,
                                           [(r"/_localstore/(.*)", LocalStoreHandler),
                                            (r"/_metadata", MetaDataHandler)])
 
+
+    def create_ring(self):
+        vc = VectorClock()
+        vc.increment(platform.node())
+        self._metadata = (vc, {"ring": [self.address]})
+        print "created ring", self._metadata
+        self.schedule_gossip(0.0)
+
+    def join_ring(self, join):
+        d = self.get_gossip(split_str_addr(join))
+        d.add_callback(self.ring_joined)
+        print d.callbacks, d.called
+
+    def ring_joined(self, result):        
+        print "joined ring", self._metadata
+        self._metadata[1]["ring"].append(self.address)
+        self._metadata[0].increment(platform.node())        
+        self.schedule_gossip(0.0)
+
+    def gossip_received(self, response):
+        print response.data
+        meta = pickle.loads(response.data)
+        print "gossip received", meta
+        self.update_meta(meta)
+
+    def update_meta(self, meta):
+        if self._metadata is None:
+            print "no previous metadata, setting", meta
+            self._metadata = meta
+            return
+        vc_new, meta_new = meta
+        vc_curr, meta_curr = self._metadata
+        if vc_new.descends_from(vc_curr) and vc_new != vc_curr:
+            print "received metadata is new", meta
+            # Accept new metadata
+            self._metadata = meta
+        else:
+            print "received metadata is old"
+            # Reconcile?
+            pass
+        
     def random_other_node(self):
-        other = [n for n in self._ring if n != self.address]
+        other = [n for n in self._metadata[1]["ring"] if n != self.address]
         if len(other) == 0:
             return None
         return other[random.randint(0, len(other)-1)]
 
-    def schedule_gossip(self):
-        self.reactor.call_later(self.gossip, self.gossip_interval)
+    def schedule_gossip(self, timeout=None):
+        if timeout is None:
+            timeout = self.gossip_interval
+        self.reactor.call_later(self.gossip, timeout)
+
+    def gossip_sent(self, result):
+        print "gossip sent"
+        self.schedule_gossip()
+
+    def get_gossip(self, n=None):
+        node = n or self.random_other_node()
+        if node is not None:
+            host, port = node
+            d = client.request("http://%s:%d/_metadata"%(host, port))
+            d.add_callback(self.gossip_received)
+            return d
 
     def gossip(self):
-        print "gossiping"
         node = self.random_other_node()
         if node is not None:
-            pass
-        self.schedule_gossip()
+            print "gossiping with:", node, "data:", self._metadata
+            host, port = node
+            d = client.request("http://%s:%d/_metadata"%(host, port), command="PUT", data=pickle.dumps(self._metadata))
+            d.add_both(self.gossip_sent)
 
     def run(self):
-        self.schedule_gossip()
         self.reactor.loop()
     
 
