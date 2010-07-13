@@ -5,6 +5,9 @@ import threading
 import functools
 import Queue
 import sys
+import time
+import heapq
+import select
 
 __version__ = "0.1"
 
@@ -58,7 +61,6 @@ class Deferred(object):
     """Very similar to Twisted's Deferred object, but with less features"""
     def __init__(self):
         self.callbacks = []
-        self._running_callbacks = False
         self.called = False
         self.paused = 0
 
@@ -69,19 +71,13 @@ class Deferred(object):
             self._run_callbacks()
 
     def _run_callbacks(self):
-        if self._running_callbacks:
-            return
         if not self.paused:
             while self.callbacks:
                 try:
-                    self._running_callbacks = True
                     cb, eb = self.callbacks.pop(0)
                     if isinstance(self.result, Failure):
                         cb = eb
-                    try:
-                        self.result = cb(self.result)
-                    finally:
-                        self._running_callbacks = False
+                    self.result = cb(self.result)
                     if isinstance(self.result, Deferred):
                         self.pause()
                         # This will cause the callback chain to resume later,
@@ -207,7 +203,7 @@ class Trigger(asyncore.dispatcher):
     def handle_connect(self):
         pass
 
-    def pull_trigger(self, func):
+    def pull_trigger(self, func=None):
         if func:
             try:
                 self.lock.acquire()
@@ -226,22 +222,52 @@ class Trigger(asyncore.dispatcher):
         finally:
             self.lock.release()
 
-# Global trigger object to wake the loop
-trigger = Trigger()
+class Reactor(object):
+    # trigger object to wake the loop
+    _trigger = Trigger()
+    
+    def __init__(self):
+        self._pending_calls = []
 
-def run_in_main(func):
-    trigger.pull_trigger(func)
+    def wake(self):
+        self._trigger.pull_trigger()
 
-def defer_to_worker(func, worker):
-    d = Deferred()
-    def callback(result):
-        if isinstance(result, Failure):
-            run_in_main(functools.partial(d.errback, result))
+    def run_in_main(self, func):
+        self._trigger.pull_trigger(func)
+
+    def defer_to_worker(self, func, worker):
+        d = Deferred()
+        def callback(result):
+            if isinstance(result, Failure):
+                self.run_in_main(functools.partial(d.errback, result))
+            else:
+                self.run_in_main(functools.partial(d.callback, result))
+        worker.execute(func, callback)
+        return d
+
+    def call_later(self, func, timeout):
+        heapq.heappush(self._pending_calls, (time.time() + timeout, func))
+        self.wake()
+
+    def timeout(self):
+        if not self._pending_calls:
+            return None
+        return max(0, self._pending_calls[0][0] - time.time())
+
+    def loop(self):
+        if hasattr(select, 'poll'):
+            poll_fun = asyncore.poll2
         else:
-            run_in_main(functools.partial(d.callback, result))
-    worker.execute(func, callback)
-    return d
+            poll_fun = asyncore.poll
 
+        while asyncore.socket_map:
+            timeout = self.timeout() or 0.0
+            poll_fun(timeout, asyncore.socket_map)
+            # check expired timeouts
+            print "checking timeouts"
+            t = time.time()
+            while self._pending_calls[0][0] < t:
+                timeout, func = heapq.heappop(self._pending_calls)
+                func()
+        print "exit loop"
 
-def loop():
-    asyncore.loop()
