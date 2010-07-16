@@ -1,5 +1,7 @@
 import functools
 import cPickle as pickle
+import base64
+import bz2
 import optparse
 import random
 import platform
@@ -7,56 +9,121 @@ import store
 import tangled.core as tc
 import tangled.client as client
 import tangled.server as ts
-from vectorclock import VectorClock
+import vectorclock
 
-class Partition(tc.Worker):
-    def __init__(self, partitionid, persistent):
-        tc.Worker.__init__(self)
+class InvalidContext(Exception):
+    pass
+
+class Storage(tc.Worker):
+    def __init__(self, reactor, name, persistent):
+        tc.Worker.__init__(self, reactor)
         if persistent:
-            self._store = store.SQLiteStore("vc_store_" + str(partitionid) + ".db")
+            self._store = store.SQLiteStore("vc_store_" + name + ".db")
         else:
             self._store = store.DictStore()
         self.start()
 
-    def get(self, key):
-        return self.defer(functools.partial(self._store.get, key))
+    def _encode(self, vc, value):
+        return bz2.compress(pickle.dumps((vc, value)))
 
-    def put(self, key, value):
-        return self.defer(functools.partial(self._store.put, key, value))
+    def _decode(self, blob):
+        return pickle.loads(bz2.decompress(blob))
+
+    def _get(self, result):
+        vc, value = self._decode(result)        
+        if value is None:
+            raise KeyError
+        return vc, value
+
+    def get(self, key):
+        d = self.defer(functools.partial(self._store.get, key))
+        d.add_callback(self._get)
+        return d
+
+    def _put_new(self, vc, client, key, value, get_result):
+        if vc is not None:
+            raise InvalidContext
+        vc = vectorclock.VectorClock()
+        return self.defer(functools.partial(self._store.put, key, self._encode(vc.increment(client), value)))        
+
+    def _put(self, vc, client, key, value, get_result):
+        old_vc, old_value = self._decode(get_result)
+        # if no vectorclock was provided, just use the stored one
+        vc = vc or old_vc
+        if vc.descends_from(old_vc):
+            return self.defer(functools.partial(self._store.put, key, self._encode(vc.increment(client), value)))
+        else:
+            # store both
+            newvc = vectorclock.merge(old_vc, vc).increment(client)
+            return self.defer(functools.partial(self._store.put, key, self._encode(newvc, [old_value, value])))            
+    def put(self, vc, client, key, value):
+        d = self.defer(functools.partial(self._store.get, key))
+        d.add_callbacks(functools.partial(self._put, vc, client, key, value),
+                        functools.partial(self._put_new, vc, client, key, value))
+        return d
     
-    def delete(self, key):
-        return self.defer(functools.partial(self._store.delete, key))
+    def delete(self, vc, client, key):
+        d = self.get(key)
+        d.add_callback(functools.partial(self._put, vc, client, key, None))
+        return d
 
 class LocalStoreHandler(object):
     def __init__(self, context):
-        self.context = context
+        self.parent = context
+
+    def _vc_to_context(self, vc):
+        return base64.b64encode(bz2.compress(pickle.dumps(vc)))
+
+    def _context_to_vc(self, context):
+        return pickle.loads(bz2.decompress(base64.b64decode(context)))
+
+    def _ok_get(self, result):
+        vc, value = result
+        context = self._vc_to_context(vc)        
+        # TODO: fix this
+        return ts.Response(200, {"X-VinzClortho-Context": context}, str(value))
 
     def _ok(self, result):
-        self.response.callback(ts.Response(200, None, result))
+        return ts.Response(200)
 
     def _error(self, result):
-        self.response.callback(ts.Response(404))
+        return ts.Response(404)
+
+    def _extract(self, request):
+        """This returns a tuple with the following:
+
+          key
+          vectorclock (or None if context not provided)
+          client id (or address if not provided)
+        """
+        try:
+            client = request.headers["X-VinzClortho-ClientId"]
+        except KeyError:
+            # Use the address as client id, if not provided
+            client = request.client_address
+        try:
+            vc = self._context_to_vc(request.headers["X-VinzClortho-Context"])
+        except KeyError:
+            vc = None
+        return request.groups[0], vc, client
 
     def do_GET(self, request):
         key = request.groups[0]
-        self.data = self.context._partition.get(key)
-        self.data.add_callbacks(self._ok, self._error)
-        self.response = tc.Deferred()
-        return self.response
+        d = self.parent._storage.get(key)
+        d.add_callbacks(self._ok_get, self._error)
+        return d
             
     def do_PUT(self, request):
-        key = request.groups[0]
-        self.data = self.context._partition.put(key, request.data)
-        self.data.add_callbacks(self._ok, self._error)
-        self.response = tc.Deferred()
-        return self.response
+        key, vc, client = self._extract(request)
+        d = self.parent._storage.put(vc, client, key, request.data)
+        d.add_callbacks(self._ok, self._error)
+        return d
             
     def do_DELETE(self, request):
-        key = request.groups[0]
-        self.data = self.context._partition.delete(key)
-        self.data.add_callbacks(self._ok, self._error)
-        self.response = tc.Deferred()
-        return self.response
+        key, vc, client = self._extract(request)
+        d = self.parent._storage.delete(key, vc, client)
+        d.add_callbacks(self._ok, self._error)
+        return d
 
     do_PUSH = do_PUT
 
@@ -64,12 +131,6 @@ class LocalStoreHandler(object):
 class MetaDataHandler(object):
     def __init__(self, context):
         self.context = context
-
-    def _ok(self, result):
-        self.response.callback(ts.Response(200, None, result))
-
-    def _error(self, result):
-        self.response.callback(ts.Response(404))
 
     def do_GET(self, request):
         print "metadata requested"
@@ -85,8 +146,7 @@ class VinzClortho(object):
     def __init__(self, addr, join, persistent):
         self.reactor = tc.Reactor()
         self.address = split_str_addr(addr)       
-        print self.address
-        self._partition = Partition(0, persistent)
+        self._storage = Storage(self.reactor, "0", persistent)
         self._metadata = None
         if join:         
             self.join = join
@@ -99,7 +159,7 @@ class VinzClortho(object):
 
 
     def create_ring(self):
-        vc = VectorClock()
+        vc = vectorclock.VectorClock()
         vc.increment(platform.node())
         self._metadata = (vc, {"ring": [self.address]})
         print "created ring", self._metadata
@@ -108,7 +168,6 @@ class VinzClortho(object):
     def join_ring(self, join):
         d = self.get_gossip(split_str_addr(join))
         d.add_callback(self.ring_joined)
-        print d.callbacks, d.called
 
     def ring_joined(self, result):        
         print "joined ring", self._metadata
@@ -117,7 +176,6 @@ class VinzClortho(object):
         self.schedule_gossip(0.0)
 
     def gossip_received(self, response):
-        print response.data
         meta = pickle.loads(response.data)
         print "gossip received", meta
         self.update_meta(meta)

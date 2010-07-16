@@ -27,7 +27,7 @@ class SQLiteStore(object):
     def put(self, key, value):
         conn = sqlite3.connect(self._db)
         c = conn.cursor()
-        c.execute("INSERT OR REPLACE INTO blobkey(k, v) VALUES(?, ?)", (key, value))
+        c.execute("INSERT OR REPLACE INTO blobkey(k, v) VALUES(?, ?)", (key, sqlite3.Binary(value)))
         conn.commit()
         c.close()
         conn.close()

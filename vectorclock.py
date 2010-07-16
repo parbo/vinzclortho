@@ -36,6 +36,7 @@ class VectorClock(object):
                           sorted(((v, k) for k, v in self._clocks.items()
                                   if t - v[0] > self.prune_age))[:self.prune_size]))
         self._clocks = newclocks        
+        return self
 
     def increment(self, name):
         try:
@@ -43,6 +44,7 @@ class VectorClock(object):
         except KeyError:
             clock = 0
         self._clocks[name] = (time.time(), clock+1)
+        return self
         
     def __eq__(self, rhs):
         for name, v1 in rhs._clocks.items():

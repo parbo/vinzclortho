@@ -9,7 +9,8 @@ import sys
 __version__ = "0.1"
 
 class Request(object):
-    def __init__(self, method, path, headers, data, groups):
+    def __init__(self, client_address, method, path, headers, data, groups):
+        self.client_address = client_address
         self.method = method
         self.path = path
         self.headers = headers
@@ -103,7 +104,12 @@ class AsyncHTTPRequestHandler(asynchat.async_chat, BaseHTTPRequestHandler):
                 try:
                     h = cls(self.server.context)
                     handler = getattr(h, "do_" + self.command)
-                    d = handler(Request(self.command, self.path, self.headers, self.rfile.read(), m.groups()))
+                    d = handler(Request(self.client_address, 
+                                        self.command, 
+                                        self.path, 
+                                        self.headers, 
+                                        self.rfile.read(), 
+                                        m.groups()))
                     d.add_callback(self.finish_request)
                 except AttributeError:
                     raise

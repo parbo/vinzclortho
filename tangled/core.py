@@ -21,11 +21,15 @@ def fail(r):
     d.callback(r)
     return d
 
+def passthru(r):
+    return r
+
 class Worker(threading.Thread):
-    def __init__(self):
+    def __init__(self, reactor):
         threading.Thread.__init__(self, target=self._runner)
         self._queue = Queue.Queue()
         self.daemon = True
+        self.reactor = reactor
 
     def _runner(self):
         while True:
@@ -45,7 +49,7 @@ class Worker(threading.Thread):
         self._queue.put((func, oncomplete))
 
     def defer(self, func):
-        return defer_to_worker(func, self)
+        return self.reactor.defer_to_worker(func, self)
 
 class Failure(object):
     """Like Twisted's Failure object, but with no features"""
@@ -85,7 +89,6 @@ class Deferred(object):
             while self.callbacks:
                 try:
                     cb, eb = self.callbacks.pop(0)
-                    print cb, eb, self.result
                     if isinstance(self.result, Failure):
                         cb = eb
                     self.result = cb(self.result)
@@ -100,16 +103,16 @@ class Deferred(object):
                     self.result = Failure()
 
     def add_callback(self, cb):
-        self.add_callbacks(cb, None)
+        self.add_callbacks(cb)
             
     def add_errback(self, eb):
-        self.add_callbacks(lambda x: x, eb)
+        self.add_callbacks(passthru, eb)
 
     def add_both(self, cb):
         self.add_callbacks(cb, cb)
 
-    def add_callbacks(self, cb, eb):
-        self.callbacks.append((cb, eb))
+    def add_callbacks(self, cb, eb=None):
+        self.callbacks.append((cb, eb or passthru))
         if self.called:
             self._run_callbacks()
             
@@ -134,22 +137,6 @@ class Deferred(object):
         if not isinstance(fail, Failure):
             fail = Failure(fail)
         self._start_callbacks(fail)        
-
-
-class Request(object):
-    def __init__(self, method, path, headers, data, groups):
-        self.method = method
-        self.path = path
-        self.headers = headers
-        self.data = data
-        self.groups = groups
-
-
-class Response(object):
-    def __init__(self, code, headers, data):
-        self.code
-        self.headers = headers
-        self.data = data
 
 
 def set_reuse_addr(s):
@@ -276,7 +263,6 @@ class Reactor(object):
             timeout = self.timeout()
             poll_fun(timeout, asyncore.socket_map)
             # check expired timeouts
-            print "checking timeouts"
             t = time.time()
             while self._pending_calls:
                 timeout, func = self._pending_calls[0]
@@ -286,5 +272,4 @@ class Reactor(object):
                 else:
                     # No timeout
                     break
-        print "exit loop"
 
