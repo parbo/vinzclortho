@@ -100,8 +100,11 @@ def merge(a, b):
         newclocks[k] = c_b[k]
 
     return VectorClock(newclocks)
+
+def _joiner(a, b):
+    return [a, b]
             
-def resolve(a, b):
+def resolve(a, b, joiner=_joiner):
     """Resolves the latest value for a and b,
     which should be a tuple of (VectorClock, value).
     """
@@ -116,13 +119,13 @@ def resolve(a, b):
     else:
         # concurrent
         newclock = merge(c_a, c_b)
-        return (newclock, [val_a, val_b])
+        return (newclock, joiner(val_a, val_b))
 
-def resolve_list(c):
+def resolve_list(c, joiner=_joiner):
     def _resolve(curr, rest):
         if not rest:
             return curr
-        curr = resolve(curr, rest[0])
+        curr = resolve(curr, rest[0], joiner)
         return _resolve(curr, rest[1:])
     return _resolve(c[0], c[1:])
 

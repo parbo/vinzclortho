@@ -20,11 +20,15 @@ class InvalidContext(Exception):
 class LocalStorage(tc.Worker):
     def __init__(self, reactor, name, persistent):
         tc.Worker.__init__(self, reactor)
+        self.name = name
         if persistent:
             self._store = store.SQLiteStore("vc_store_" + name + ".db")
         else:
             self._store = store.DictStore()
         self.start()
+
+    def __str__(self):
+        return "LocalStorage(%s)"%self.name
 
     def get(self, key):
         return self.defer(functools.partial(self._store.get, key))
@@ -39,6 +43,9 @@ class LocalStorage(tc.Worker):
 class RemoteStorage(object):
     def __init__(self, address):
         self.address = address
+
+    def __str__(self):
+        return "RemoteStorage((%s, %d))"%self.address
 
     def _ok_get(self, result):
         if result.status == 200:
@@ -77,34 +84,28 @@ class LocalStoreHandler(object):
         self.parent = context
 
     def _ok_get(self, result):
-        print "LocalStore: GET response:", result
         return ts.Response(200, None, result)
 
     def _ok(self, result):
-        print "LocalStore: ok response:", result
         return ts.Response(200)
 
     def _error(self, result):
-        print "LocalStore: error response:", result
         return ts.Response(404)
 
     def do_GET(self, request):
         key = request.groups[0]
-        print "LocalStore: GET", key, "requested"
         d = self.parent._storage.get(key)
         d.add_callbacks(self._ok_get, self._error)
         return d
             
     def do_PUT(self, request):
         key = request.groups[0]
-        print "LocalStore: PUT", key, "requested"
         d = self.parent._storage.put(key, request.data)
         d.add_callbacks(self._ok, self._error)
         return d
             
     def do_DELETE(self, request):
         key = request.groups[0]
-        print "LocalStore: DELETE", key, "requested"
         d = self.parent._storage.delete(key)
         d.add_callbacks(self._ok, self._error)
         return d
@@ -118,13 +119,12 @@ class StoreHandler(object):
     def __init__(self, context):
         self.parent = context
         self.results = []
-        self._num_fail = 0
+        self.failed = []
 
     def _encode(self, vc, value):
         return bz2.compress(pickle.dumps((vc, value)))
 
     def _decode(self, blob):
-        print "Decoding", blob
         return pickle.loads(bz2.decompress(blob))
 
     def _vc_to_context(self, vc):
@@ -151,10 +151,31 @@ class StoreHandler(object):
             vc = None
         return request.groups[0], vc, client
 
+    def _resolve(self):
+        """Resolves the list of results to a unified result (which may be a list of concurrent versions)"""
+        def joiner(a, b):
+            """This way of joining concurrent versions makes it possible 
+            to store concurrent versions as lists, while still being able 
+            to return a single list for a request"""
+            if not isinstance(a, list):
+                a = [a]
+            if not isinstance(b, list):
+                b = [b]
+            return a + b              
+        return vectorclock.resolve_list([result for replica, result in self.results], joiner)        
+
     def _read_repair(self, result):
-        if len(self.results) + self._num_fail == len(self.replicas):
-            print "do read-repair"
-            # TODO: figure out what value to use for read-repair
+        if len(self.results) + len(self.failed) == len(self.replicas):
+            resolved = self._resolve()
+            vc_final, value_final = resolved
+            for replica, result in self.results:
+                vc, value = result
+                if vc_final.descends_from(vc) and not vc.descends_from(vc_final):
+                    print "read-repair needed for", replica
+                    d = replica.put(self.key, self._encode(vc_final, value_final))
+            for replica, result in self.failed:
+                print "read-repair of failed node", replica
+                d = replica.put(self.key, self._encode(vc_final, value_final))
         return result
 
     def _read_quorum_acheived(self):
@@ -165,7 +186,7 @@ class StoreHandler(object):
         return len(self.results) >= self.W
 
     def _all_received(self):
-        return len(self.results) + self._num_fail == len(self.replicas)
+        return len(self.results) + len(self.failed) == len(self.replicas)
 
     def _respond_error(self):
         if self.response.called:
@@ -178,15 +199,16 @@ class StoreHandler(object):
 
     def _respond_get_ok(self):
         if self.response.called:
-            return
-        resolved = vectorclock.resolve_list([self._decode(result) for replica, result in self.results])
+            return        
+        resolved = vectorclock.resolve_list([result for replica, result in self.results])
         vc, value = resolved
         context = self._vc_to_context(vc)
         # TODO: make sure the replica object returns str
         self.response.callback(ts.Response(200, {"X-VinzClortho-Context": context}, str(value)))
 
     def _get_ok(self, replica, result):
-        # This handles deleted keys
+        result = self._decode(result)
+        # This handles deleted keys (TODO: this means concurrent deletes are lost, is this ok?)
         if result is None:
             return self._fail(replica, result)
         # There was an actual value, handle it
@@ -198,19 +220,18 @@ class StoreHandler(object):
         return result
 
     def _fail(self, replica, result):
-        print "fail", result
-        self._num_fail += 1
+        self.failed.append((replica, result))
         if self._all_received():
             self._respond_error()
         return result
 
     def do_GET(self, request):
         self.response = tc.Deferred()
-        key = request.groups[0]
-        self.replicas = self.parent.get_replicas(key)
+        self.key = request.groups[0]
+        self.replicas = self.parent.get_replicas(self.key)
         print "Replicas:", self.replicas
         for r in self.replicas:
-            d = r.get(key)
+            d = r.get(self.key)
             d.add_callbacks(functools.partial(self._get_ok, r), 
                             functools.partial(self._fail, r))
             d.add_both(self._read_repair)
@@ -289,7 +310,6 @@ class VinzClortho(object):
             return RemoteStorage((node.host, node.port))
 
     def get_replicas(self, key):
-        print "ring has ", len(self._ring.vnodes), "virtual nodes"
         return [self._get_replica(n.node, key) for n in self._ring.preferred_from_key(key, self.N)]
 
     def _update_ring(self):
