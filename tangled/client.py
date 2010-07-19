@@ -6,10 +6,11 @@ import cStringIO
 import core
 
 class Response(object):
-    def __init__(self):
+    def __init__(self, addr):
         self.data = ""
         self.header = ""
         self.finished = False
+        self.server_address = addr
 
     def close(self):
         self.finished = True
@@ -34,28 +35,27 @@ class AsyncHTTPClient(asyncore.dispatcher_with_send):
             self._request = self._request + 'Content-Length: %d\r\n\r\n%s' % (len(data), data)
         else:
             self._request = self._request + "\r\n"
-        self.consumer = consumer
-        if self.consumer is None:
-            self.consumer = Response()
-            self.response = self.consumer
-        self.status = None
-        self.header = None
-        self.data = ""
-        self._result = core.Deferred()
-        self.create_socket(socket.AF_INET, socket.SOCK_STREAM)
         addr = parsed.netloc.split(":")
         host = addr[0]
         try:
             port = int(addr[1])
         except IndexError:
             port = 80        
+        self.consumer = consumer
+        if self.consumer is None:
+            self.consumer = Response((host, port))
+            self.response = self.consumer
+        self.status = None
+        self.header = None
+        self.data = ""
+        self._result = core.Deferred()
+        self.create_socket(socket.AF_INET, socket.SOCK_STREAM)
         self.connect((host, port))
 
     def request(self):
         return self._result
 
     def handle_connect(self):
-        print "sending request:", self._request
         self.send(self._request)
 
     def notify_header(self):
@@ -65,12 +65,10 @@ class AsyncHTTPClient(asyncore.dispatcher_with_send):
         # connection failed; notify consumer (status is None)
         self.close()
         self.notify_header()
-        print "connection failed"
         self._result.callback(self.response)
 
     def handle_read(self):
         data = self.recv(2048)        
-        print "received:\n", data 
         if not self.header:
             self.data = self.data + data
             i = self.data.find("\r\n\r\n")
@@ -96,7 +94,6 @@ class AsyncHTTPClient(asyncore.dispatcher_with_send):
     def handle_close(self):
         self.consumer.close()
         self.close()
-        print "connection closed"
         self._result.callback(self.response)
 
 def request(url, command="GET", data=""):

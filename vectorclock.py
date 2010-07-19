@@ -59,6 +59,9 @@ class VectorClock(object):
         # Everything from rhs was in self, check length to see if self has more
         return len(self._clocks) == len(rhs._clocks)
 
+    def __ne__(self, rhs):
+        return not self.__eq__(rhs)
+
     def descends_from(self, rhs):
         for name, v_r in rhs._clocks.items():
             try:
@@ -115,6 +118,13 @@ def resolve(a, b):
         newclock = merge(c_a, c_b)
         return (newclock, [val_a, val_b])
 
+def resolve_list(c):
+    def _resolve(curr, rest):
+        if not rest:
+            return curr
+        curr = resolve(curr, rest[0])
+        return _resolve(curr, rest[1:])
+    return _resolve(c[0], c[1:])
 
 class TestVectorClock(unittest.TestCase):
     def test_empty_equals_empty(self):

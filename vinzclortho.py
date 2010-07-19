@@ -7,14 +7,17 @@ import random
 import platform
 import store
 import tangled.core as tc
-import tangled.client as client
+import tangled.client
 import tangled.server as ts
 import vectorclock
+import consistenthashing as chash
+
 
 class InvalidContext(Exception):
     pass
 
-class Storage(tc.Worker):
+
+class LocalStorage(tc.Worker):
     def __init__(self, reactor, name, persistent):
         tc.Worker.__init__(self, reactor)
         if persistent:
@@ -23,71 +26,109 @@ class Storage(tc.Worker):
             self._store = store.DictStore()
         self.start()
 
-    def _encode(self, vc, value):
-        return bz2.compress(pickle.dumps((vc, value)))
+    def get(self, key):
+        return self.defer(functools.partial(self._store.get, key))
 
-    def _decode(self, blob):
-        return pickle.loads(bz2.decompress(blob))
+    def put(self, key, value):
+        return self.defer(functools.partial(self._store.get, key, value))
+    
+    def delete(self, key):
+        return self.defer(functools.partial(self._store.delete, key))
 
-    def _get(self, result):
-        vc, value = self._decode(result)        
-        if value is None:
+
+class RemoteStorage(object):
+    def __init__(self, address):
+        self.address = address
+
+    def _ok_get(self, result):
+        if result.code == 200:
+            return result.data
+        else:
             raise KeyError
-        return vc, value
+
+    def _ok(self, result):
+        if result.code == 200:
+            return
+        else:
+            raise KeyError
+        
 
     def get(self, key):
-        d = self.defer(functools.partial(self._store.get, key))
-        d.add_callback(self._get)
+        host, port = self.address
+        d = tangled.client.request("http://%s:%d/_localstore/%s"%(host, port, key))
+        d.add_callback(self._ok_get)
+        return d
+            
+    def put(self, key, value):
+        host, port = self.address
+        d = tangled.client.request("http://%s:%d/_localstore/%s"%(host, port, key), "PUT", value)
+        d.add_callback(self._ok)
+        return d        
+            
+    def delete(self, key):
+        host, port = self.address
+        d = tangled.client.request("http://%s:%d/_localstore/%s"%(host, port, key), "DELETE")
+        d.add_callback(self._ok)
         return d
 
-    def _put_new(self, vc, client, key, value, get_result):
-        if vc is not None:
-            raise InvalidContext
-        vc = vectorclock.VectorClock()
-        return self.defer(functools.partial(self._store.put, key, self._encode(vc.increment(client), value)))        
-
-    def _put(self, vc, client, key, value, get_result):
-        old_vc, old_value = self._decode(get_result)
-        # if no vectorclock was provided, just use the stored one
-        vc = vc or old_vc
-        if vc.descends_from(old_vc):
-            return self.defer(functools.partial(self._store.put, key, self._encode(vc.increment(client), value)))
-        else:
-            # store both
-            newvc = vectorclock.merge(old_vc, vc).increment(client)
-            return self.defer(functools.partial(self._store.put, key, self._encode(newvc, [old_value, value])))            
-    def put(self, vc, client, key, value):
-        d = self.defer(functools.partial(self._store.get, key))
-        d.add_callbacks(functools.partial(self._put, vc, client, key, value),
-                        functools.partial(self._put_new, vc, client, key, value))
-        return d
-    
-    def delete(self, vc, client, key):
-        d = self.get(key)
-        d.add_callback(functools.partial(self._put, vc, client, key, None))
-        return d
 
 class LocalStoreHandler(object):
     def __init__(self, context):
         self.parent = context
 
-    def _vc_to_context(self, vc):
-        return base64.b64encode(bz2.compress(pickle.dumps(vc)))
-
-    def _context_to_vc(self, context):
-        return pickle.loads(bz2.decompress(base64.b64decode(context)))
-
     def _ok_get(self, result):
-        vc, value = result
-        context = self._vc_to_context(vc)        
-        # TODO: fix this
-        return ts.Response(200, {"X-VinzClortho-Context": context}, str(value))
+        return ts.Response(200, None, result)
 
     def _ok(self, result):
         return ts.Response(200)
 
     def _error(self, result):
         return ts.Response(404)
+
+    def do_GET(self, request):
+        key = request.groups[0]
+        print "LocalStore: GET", key, "requested"
+        d = self.parent._storage.get(key)
+        d.add_callbacks(self._ok_get, self._error)
+        return d
+            
+    def do_PUT(self, request):
+        key = request.groups[0]
+        print "LocalStore: PUT", key, "requested"
+        d = self.parent._storage.put(key, request.data)
+        d.add_callbacks(self._ok, self._error)
+        return d
+            
+    def do_DELETE(self, request):
+        key = request.groups[0]
+        print "LocalStore: DELETE", key, "requested"
+        d = self.parent._storage.delete(key)
+        d.add_callbacks(self._ok, self._error)
+        return d
+
+    do_PUSH = do_PUT
+
+
+class StoreHandler(object):
+    W = 2
+    R = 2
+    def __init__(self, context):
+        self.parent = context
+        self.results = []
+        self._num_fail = 0
+
+    def _encode(self, vc, value):
+        return bz2.compress(pickle.dumps((vc, value)))
+
+    def _decode(self, blob):
+        print "Decoding", blob
+        return pickle.loads(bz2.decompress(blob))
+
+    def _vc_to_context(self, vc):
+        return base64.b64encode(bz2.compress(pickle.dumps(vc)))
+
+    def _context_to_vc(self, context):
+        return pickle.loads(bz2.decompress(base64.b64decode(context)))
 
     def _extract(self, request):
         """This returns a tuple with the following:
@@ -107,26 +148,106 @@ class LocalStoreHandler(object):
             vc = None
         return request.groups[0], vc, client
 
+    def _read_repair(self, result):
+        if len(self.results) + self._num_fail == len(self.replicas):
+            print "do read-repair"
+            # TODO: figure out what value to use for read-repair
+        return result
+
+    def _read_quorum_acheived(self):
+        print "Read quorum?", len(self.results), self.R
+        return len(self.results) >= self.R
+
+    def _write_quorum_acheived(self):
+        return len(self.results) >= self.W
+
+    def _all_received(self):
+        return len(self.results) + self._num_fail == len(self.replicas)
+
+    def _respond_error(self):
+        if self.response.called:
+            return
+        # TODO: find suitable error code
+        self.response.callback(ts.Response(404))
+
+    def _respond_ok(self):
+        self.response.callback(ts.Response(200))
+
+    def _respond_get_ok(self):
+        if self.response.called:
+            return
+        resolved = vectorclock.resolve_list([self._decode(result) for replica, result in self.results])
+        vc, value = resolved
+        context = self._vc_to_context(vc)
+        # TODO: make sure the replica object returns str
+        self.response.callback(ts.Response(200, {"X-VinzClortho-Context": context}, str(value)))
+
+    def _get_ok(self, replica, result):
+        # This handles deleted keys
+        if result is None:
+            return self._fail(replica, result)
+        # There was an actual value, handle it
+        self.results.append((replica, result))
+        if self._read_quorum_acheived():
+            self._respond_get_ok()    
+        elif self._all_received():
+            self._respond_error()
+        return result
+
+    def _fail(self, replica, result):
+        print "fail", result
+        self._num_fail += 1
+        if self._all_received():
+            self._respond_error()
+        return result
+
     def do_GET(self, request):
+        self.response = tc.Deferred()
         key = request.groups[0]
-        d = self.parent._storage.get(key)
-        d.add_callbacks(self._ok_get, self._error)
-        return d
+        self.replicas = self.parent.get_replicas(key)
+        print "Replicas:", self.replicas
+        for r in self.replicas:
+            d = r.get(key)
+            d.add_callbacks(functools.partial(self._get_ok, r), 
+                            functools.partial(self._fail, r))
+            d.add_both(self._read_repair)
+        return self.response
             
+    def _ok(self, replica, result):
+        self.results.append((replica, result))
+        if self._write_quorum_acheived():
+            self._respond_ok()
+        elif self._all_received():
+            self._respond_error()
+
     def do_PUT(self, request):
+        self.response = tc.Deferred()
         key, vc, client = self._extract(request)
-        d = self.parent._storage.put(vc, client, key, request.data)
-        d.add_callbacks(self._ok, self._error)
-        return d
+        self.replicas = self.parent.get_replicas(key)
+        vc = vc or vectorclock.VectorClock()
+        vc.increment(client)
+        value = self._encode(vc, request.data)
+        for r in self.replicas:
+            d = r.put(key, value)
+            d.add_callbacks(functools.partial(self._ok, r), 
+                            functools.partial(self._fail, r))
+        return self.response
             
     def do_DELETE(self, request):
+        self.response = tc.Deferred()
         key, vc, client = self._extract(request)
-        d = self.parent._storage.delete(key, vc, client)
-        d.add_callbacks(self._ok, self._error)
-        return d
+        self.replicas = self.parent.get_replicas(key)
+        vc = vc or vectorclock.VectorClock()
+        vc.increment(client)
+        value = self._encode(vc, None)
+        for r in self.replicas:
+            # delete is handled as a put of None
+            d = r.put(key, value)
+            d.add_callbacks(functools.partial(self._ok, r), 
+                            functools.partial(self._fail, r))
+        return self.response
 
     do_PUSH = do_PUT
-
 
 class MetaDataHandler(object):
     def __init__(self, context):
@@ -143,58 +264,90 @@ class MetaDataHandler(object):
 
 class VinzClortho(object):
     gossip_interval=30.0
+    N=3    
     def __init__(self, addr, join, persistent):
         self.reactor = tc.Reactor()
-        self.address = split_str_addr(addr)       
-        self._storage = Storage(self.reactor, "0", persistent)
-        self._metadata = None
-        if join:         
-            self.join = join
-            self.join_ring(join)
-        else:
-            self.create_ring()
+        self.address = split_str_addr(addr)
+        self.host, self.port = self.address
+        self._vcid = self.address
+        self._storage = LocalStorage(self.reactor, "%s:%d"%(self.host, self.port), persistent)
+        self._metadata = None        
+        self._ring = None
+        self.create_ring(join)
         self._server = ts.AsyncHTTPServer(self.address, self,
-                                          [(r"/_localstore/(.*)", LocalStoreHandler),
+                                          [(r"/store/(.*)", StoreHandler),
+                                           (r"/_localstore/(.*)", LocalStoreHandler),
                                            (r"/_metadata", MetaDataHandler)])
 
+    def _get_replica(self, node, key):
+        if node.host == self.host and node.port == self.port:
+            return self._storage
+        else:
+            return RemoteStorage((node.host, node.port))
 
-    def create_ring(self):
-        vc = vectorclock.VectorClock()
-        vc.increment(platform.node())
-        self._metadata = (vc, {"ring": [self.address]})
-        print "created ring", self._metadata
-        self.schedule_gossip(0.0)
+    def get_replicas(self, key):
+        print "ring has ", len(self._ring.vnodes), "virtual nodes"
+        return [self._get_replica(n.node, key) for n in self._ring.preferred_from_key(key, self.N)]
 
-    def join_ring(self, join):
-        d = self.get_gossip(split_str_addr(join))
-        d.add_callback(self.ring_joined)
+    def _update_ring(self):
+        self._ring = chash.Ring([chash.Node(host, port, 100) for host, port in self._metadata[1]["ring"]])
+    
+    def create_ring(self, join):
+        if join:
+            d = self.get_gossip(split_str_addr(join))
+            d.add_callback(self.ring_joined)
+        else:
+            vc = vectorclock.VectorClock()
+            vc.increment(self._vcid)
+            self._metadata = (vc, {"ring": [self.address]})
+            self._update_ring()
+            self.schedule_gossip()
 
     def ring_joined(self, result):        
-        print "joined ring", self._metadata
-        self._metadata[1]["ring"].append(self.address)
-        self._metadata[0].increment(platform.node())        
         self.schedule_gossip(0.0)
 
-    def gossip_received(self, response):
+    def gossip_received(self, node, response):
         meta = pickle.loads(response.data)
-        print "gossip received", meta
-        self.update_meta(meta)
+        if self.update_meta(meta):
+            print "update gossip", node
+            url = "http://%s:%d/_metadata"%node
+            d = tangled.client.request(url, command="PUT", data=pickle.dumps(self._metadata))
+            d.add_both(self.gossip_sent)
+        else:
+            self.schedule_gossip()
 
     def update_meta(self, meta):
+        old = False
+
+        # Update metadata as needed
         if self._metadata is None:
-            print "no previous metadata, setting", meta
-            self._metadata = meta
-            return
-        vc_new, meta_new = meta
-        vc_curr, meta_curr = self._metadata
-        if vc_new.descends_from(vc_curr) and vc_new != vc_curr:
-            print "received metadata is new", meta
-            # Accept new metadata
             self._metadata = meta
         else:
-            print "received metadata is old"
-            # Reconcile?
-            pass
+            vc_new, meta_new = meta
+            vc_curr, meta_curr = self._metadata
+            if vc_new.descends_from(vc_curr):
+                if vc_new != vc_curr:
+                    print "received metadata is new", meta
+                    # Accept new metadata
+                    self._metadata = meta
+                    self._update_ring()                
+                else:
+                    print "received metadata is the same"
+            else:
+                print "received metadata is old"
+                old = True
+                # Reconcile?
+
+        # Add myself if needed
+        ring = self._metadata[1]["ring"]
+        # maybe use a set instead?
+        if self.address not in ring:
+            print "add myself to metadata"
+            ring.append(self.address)
+            self._metadata[0].increment(self._vcid)        
+            old = True
+
+        return old
         
     def random_other_node(self):
         other = [n for n in self._metadata[1]["ring"] if n != self.address]
@@ -205,27 +358,24 @@ class VinzClortho(object):
     def schedule_gossip(self, timeout=None):
         if timeout is None:
             timeout = self.gossip_interval
-        self.reactor.call_later(self.gossip, timeout)
+        self.reactor.call_later(self.get_gossip, timeout)
 
     def gossip_sent(self, result):
         print "gossip sent"
         self.schedule_gossip()
 
+    def gossip_error(self, result):
+        print "gossip error"
+        self.schedule_gossip()
+
     def get_gossip(self, n=None):
         node = n or self.random_other_node()
         if node is not None:
+            print "gossip with", node
             host, port = node
-            d = client.request("http://%s:%d/_metadata"%(host, port))
-            d.add_callback(self.gossip_received)
-            return d
-
-    def gossip(self):
-        node = self.random_other_node()
-        if node is not None:
-            print "gossiping with:", node, "data:", self._metadata
-            host, port = node
-            d = client.request("http://%s:%d/_metadata"%(host, port), command="PUT", data=pickle.dumps(self._metadata))
-            d.add_both(self.gossip_sent)
+            d = tangled.client.request("http://%s:%d/_metadata"%(host, port))
+            d.add_callbacks(functools.partial(self.gossip_received, node), self.gossip_error)
+            return d            
 
     def run(self):
         self.reactor.loop()

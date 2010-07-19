@@ -98,7 +98,6 @@ class AsyncHTTPRequestHandler(asynchat.async_chat, BaseHTTPRequestHandler):
     def handle_request(self):
         """Dispatch the request to a handler"""
         for r, cls in self.urlhandlers:
-            print "requested:", self.path
             m = re.match(r, self.path)
             if m is not None:
                 try:

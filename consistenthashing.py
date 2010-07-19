@@ -3,7 +3,7 @@ import itertools
 import unittest
 import bisect
 
-def hash(s):
+def hashval(s):
     return int(hashlib.md5(s).hexdigest(), 16)
 
 class Node(object):
@@ -11,10 +11,13 @@ class Node(object):
         self.host = host
         self.port = port
         self.nodes = [VirtualNode(self, i) for i in range(num_vnodes)]
-        self.hash = hash(self.name)
+        self._hash = hashval(self.name)
 
     def __eq__(self, rhs):
-        return self.hash == rhs.hash
+        return self._hash == rhs._hash
+
+    def __ne__(self, rhs):
+        return not self.__eq__(rhs)    
 
     @property
     def name(self):
@@ -30,17 +33,20 @@ class VirtualNode(object):
     def __init__(self, node, vnode):
         self.node = node
         self.vnode = vnode
-        self.hash = hash(self.name)
+        self._hash = hashval(self.name)
 
     def __eq__(self, rhs):
-        return self.hash == rhs.hash
+        return self._hash == rhs._hash
 
-    def __lt__(self, rhs):
+    def __ne__(self, rhs):
+        return not self.__eq__(rhs)
+
+    def __cmp__(self, rhs):
         try:
-            return self.hash < rhs.hash
+            return cmp(self._hash, rhs._hash)
         except AttributeError:
             # compare with just a hash
-            return self.hash < rhs
+            return cmp(self._hash, rhs)
 
     @property
     def name(self):
@@ -85,12 +91,21 @@ class Ring(object):
         self.vnodes.remove(vnode)
 
     def key_to_vnode(self, key):
-        return self.vnodes[bisect.bisect_left(self.vnodes, hash(key))]       
+        return self.vnodes[bisect.bisect_left(self.vnodes, hashval(key))]       
 
     def preferred(self, vnode, n):
         # walk clockwise from node, and return n vnodes that don't have the same parent
-        return list(itertools.islice(itertools.ifilterfalse(lambda x: x != vnode and x.node == vnode.node, self._walk_cw(vnode)), n))
+        physnodes = set()
+        def seen(vnode):
+            if vnode.node in physnodes:
+                return True
+            physnodes.add(vnode.node)
+            return False
+        return list(itertools.islice(itertools.ifilterfalse(seen, self._walk_cw(vnode)), n))
 
+    def preferred_from_key(self, key, n):
+        vnode = self.key_to_vnode(key)
+        return self.preferred(vnode, n)
     
 class TestConsistentHashing(unittest.TestCase):
     def test_add_node(self):
@@ -127,19 +142,19 @@ class TestConsistentHashing(unittest.TestCase):
         r = Ring(nodes)
 
         n = r.vnodes[3]
-        g = r._walk_cw(n.hash)
+        g = r._walk_cw(n._hash)
         next = g.next()
         self.assertEqual(next, r.vnodes[3])
-        g = r._walk_cw(n.hash-1)
+        g = r._walk_cw(n._hash-1)
         next = g.next()
         self.assertEqual(next, r.vnodes[3])
-        g = r._walk_cw(n.hash+1)
+        g = r._walk_cw(n._hash+1)
         next = g.next()
         self.assertEqual(next, r.vnodes[4])
         g = r._walk_cw(0)
         next = g.next()
         self.assertEqual(next, r.vnodes[0])
-        g = r._walk_cw(r.vnodes[-1].hash+1)
+        g = r._walk_cw(r.vnodes[-1]._hash+1)
         next = g.next()
         self.assertEqual(next, r.vnodes[0])
 
