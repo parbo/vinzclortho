@@ -30,7 +30,7 @@ class LocalStorage(tc.Worker):
         return self.defer(functools.partial(self._store.get, key))
 
     def put(self, key, value):
-        return self.defer(functools.partial(self._store.get, key, value))
+        return self.defer(functools.partial(self._store.put, key, value))
     
     def delete(self, key):
         return self.defer(functools.partial(self._store.delete, key))
@@ -41,7 +41,7 @@ class RemoteStorage(object):
         self.address = address
 
     def _ok_get(self, result):
-        if result.code == 200:
+        if result.status == 200:
             return result.data
         else:
             raise KeyError
@@ -77,12 +77,15 @@ class LocalStoreHandler(object):
         self.parent = context
 
     def _ok_get(self, result):
+        print "LocalStore: GET response:", result
         return ts.Response(200, None, result)
 
     def _ok(self, result):
+        print "LocalStore: ok response:", result
         return ts.Response(200)
 
     def _error(self, result):
+        print "LocalStore: error response:", result
         return ts.Response(404)
 
     def do_GET(self, request):
@@ -290,6 +293,7 @@ class VinzClortho(object):
         return [self._get_replica(n.node, key) for n in self._ring.preferred_from_key(key, self.N)]
 
     def _update_ring(self):
+        print "updating chash ring"
         self._ring = chash.Ring([chash.Node(host, port, 100) for host, port in self._metadata[1]["ring"]])
     
     def create_ring(self, join):
@@ -344,7 +348,8 @@ class VinzClortho(object):
         if self.address not in ring:
             print "add myself to metadata"
             ring.append(self.address)
-            self._metadata[0].increment(self._vcid)        
+            self._metadata[0].increment(self._vcid)
+            self._update_ring()
             old = True
 
         return old

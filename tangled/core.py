@@ -99,7 +99,6 @@ class Deferred(object):
                         # available
                         self.add_both(self._continue)
                 except:
-                    raise
                     self.result = Failure()
 
     def add_callback(self, cb):

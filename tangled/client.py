@@ -21,6 +21,13 @@ class Response(object):
     def http_header(self, header):
         self.header = header
 
+    def http_status(self, status):
+        self.status = int(status[1])
+        try:
+            self.reason = status[2]
+        except IndexError:
+            self.reason = ""        
+
 
 class AsyncHTTPClient(asyncore.dispatcher_with_send):
     """Asynchronous HTTP client, based on 
@@ -59,6 +66,7 @@ class AsyncHTTPClient(asyncore.dispatcher_with_send):
         self.send(self._request)
 
     def notify_header(self):
+        self.consumer.http_status(self.status)
         self.consumer.http_header(self.header)
 
     def handle_expt(self):
