@@ -1,4 +1,5 @@
 import sqlite3
+import bsddb
 
 class DictStore(object):
     def __init__(self):
@@ -12,6 +13,21 @@ class DictStore(object):
 
     def delete(self, key):
         del self._store[key]
+
+class BerkeleyDBStore(object):
+    def __init__(self, filename):
+        self._store = bsddb.btopen(filename)
+
+    def put(self, key, value):
+        self._store[key] = value
+        self._store.sync()
+
+    def get(self, key):
+        return self._store[key]
+
+    def delete(self, key):
+        del self._store[key]
+        self._store.sync()
 
 class SQLiteStore(object):
     def __init__(self, filename):

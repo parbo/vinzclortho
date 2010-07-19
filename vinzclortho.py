@@ -22,7 +22,7 @@ class LocalStorage(tc.Worker):
         tc.Worker.__init__(self, reactor)
         self.name = name
         if persistent:
-            self._store = store.SQLiteStore("vc_store_" + name + ".db")
+            self._store = store.BerkeleyDBStore("vc_store_" + name + ".db")
         else:
             self._store = store.DictStore()
         self.start()
