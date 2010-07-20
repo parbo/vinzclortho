@@ -1,20 +1,25 @@
 import hashlib
 import itertools
 import unittest
-import bisect
+import random
 
 def hashval(s):
-    return int(hashlib.md5(s).hexdigest(), 16)
+    """The hash value is a 160 bit integer"""
+    return int(hashlib.sha1(s).hexdigest(), 16)
+
+MAXHASH=((2**160)-1)
+
+def random_elem(list_):
+    return list_[random.randint(0, len(list_)-1)]
 
 class Node(object):
-    def __init__(self, host, port, num_vnodes):
+    def __init__(self, host, port):
         self.host = host
         self.port = port
-        self.nodes = [VirtualNode(self, i) for i in range(num_vnodes)]
-        self._hash = hashval(self.name)
+        self.claim = []
 
     def __eq__(self, rhs):
-        return self._hash == rhs._hash
+        return self.name == rhs.name
 
     def __ne__(self, rhs):
         return not self.__eq__(rhs)    
@@ -27,143 +32,131 @@ class Node(object):
         return self.name
 
     def __repr__(self):
-        return "Node(%s, %s, %s)"%(self.host, self.port, len(self.nodes))
+        return "Node(%s, %s, %s)"%(self.host, self.port, repr(self.claim))
 
-class VirtualNode(object):
-    def __init__(self, node, vnode):
-        self.node = node
-        self.vnode = vnode
-        self._hash = hashval(self.name)
-
-    def __eq__(self, rhs):
-        return self._hash == rhs._hash
-
-    def __ne__(self, rhs):
-        return not self.__eq__(rhs)
-
-    def __cmp__(self, rhs):
-        try:
-            return cmp(self._hash, rhs._hash)
-        except AttributeError:
-            # compare with just a hash
-            return cmp(self._hash, rhs)
-
-    @property
-    def name(self):
-        return "node_%d@%s"%(self.vnode, self.node.name)
-
-    def __str__(self):
-        return self.name
-
-    def __repr__(self):
-        return "VirtualNode(%s, %d)"%(repr(self.node), self.vnode)
 
 class Ring(object):
-    def __init__(self, nodes=None):
-        self.vnodes = []
-        nodes = nodes or []
-        for n in nodes:
-            self.add_node(n)
+    def __init__(self, partitions, node):
+        self.nodes = [node]
+        node.claim = range(partitions)
+        self.partitions = [node] * partitions
 
-    def _walk_cw(self, vnode_or_hash):
+    def _walk_cw(self, key):
         """A generator that iterates all nodes, starting at the hash value provided"""
-        start = bisect.bisect_left(self.vnodes, vnode_or_hash)
+        start = self.key_to_partition(key)
         n = 0
-        while n < len(self.vnodes):
-            if start >= len(self.vnodes):
+        while n < len(self.partitions):
+            if start >= len(self.partitions):
                 start = 0
-            yield self.vnodes[start]
-            n = n + 1
-            start = start + 1 
+            yield self.partitions[start]
+            n += 1
+            start += 1 
 
-    def add_node(self, node):
-        for vnode in node.nodes:
-            self.add_vnode(vnode)
+    def update_node(self, node, claim):
+        """This will set the number of claimed partitions to 'claim'
+        by stealing/giving partitions at random
+        """
+        if claim > len(node.claim):
+            unclaimed = set(range(len(self.partitions))) - set(node.claim)
+            while len(node.claim) != claim:
+                p = random_elem(list(unclaimed))
+                n = self.partitions[p]
+                del n.claim[n.claim.index(p)]
+                n.claim.sort()
+                node.claim.append(p)
+                self.partitions[p] = node
+                unclaimed.remove(p)
+        elif claim < len(node.claim):
+            others = [n for n in self.nodes if n != node]
+            while len(node.claim) != claim:
+                p = node.claim.pop(0)
+                n = random_elem(others)
+                n.claim.append(p)
+                n.claim.sort()
+                self.partitions[p] = n
+        node.claim.sort()
 
-    def add_vnode(self, vnode):
-        bisect.insort(self.vnodes, vnode)
+    def add_node(self, node, claim=None):
+        assert node not in self.nodes
+        self.nodes.append(node)
+        claim = claim or (len(self.partitions) // len(self.nodes))
+        self.update_node(node, claim)
 
     def remove_node(self, node):
-        for vnode in node.nodes:
-            self.remove_vnode(vnode)
+        self.update_node(node, 0)
+        del self.nodes[self.nodes.index(node)]
 
-    def remove_vnode(self, vnode):
-        self.vnodes.remove(vnode)
+    def key_to_partition(self, key):
+        keys_per_partition = MAXHASH // len(self.partitions)
+        return hashval(key) // keys_per_partition
 
-    def key_to_vnode(self, key):
-        return self.vnodes[bisect.bisect_left(self.vnodes, hashval(key))]       
+    def partition_to_node(self, partition):
+        return self.partitions[partition]
 
-    def preferred(self, vnode, n):
-        # walk clockwise from node, and return n vnodes that don't have the same parent
-        physnodes = set()
-        def seen(vnode):
-            if vnode.node in physnodes:
+    def preferred(self, key, n):
+        nodes = set()
+        def seen(node):
+            if node in nodes:
                 return True
-            physnodes.add(vnode.node)
+            nodes.add(node)
             return False
-        return list(itertools.islice(itertools.ifilterfalse(seen, self._walk_cw(vnode)), n))
+        return list(itertools.islice(itertools.ifilterfalse(seen, self._walk_cw(key)), n))
 
-    def preferred_from_key(self, key, n):
-        vnode = self.key_to_vnode(key)
-        return self.preferred(vnode, n)
-    
+
 class TestConsistentHashing(unittest.TestCase):
+    def test_new(self):
+        n = Node("localhost", 8080)
+        r = Ring(8, n)
+        self.assertEqual(n.claim, range(8))
+
     def test_add_node(self):
-        n = Node("localhost", 8080, 1)
-        r = Ring([n])
+        n1 = Node("localhost", 8080)
+        n2 = Node("apansson", 8080)
+        r = Ring(8, n1)
+        r.add_node(n2)
+        self.assertEqual(len(n1.claim), 4)
+        self.assertEqual(len(n2.claim), 4)
+        self.assertEqual(set(n1.claim) & set(n2.claim), set())
 
-        for vnode in n.nodes:
-            self.assertEqual(1, len(r.preferred(vnode, 3)))
+    def test_increase_node(self):
+        n1 = Node("localhost", 8080)
+        n2 = Node("apansson", 8080)
+        r = Ring(8, n1)
+        r.add_node(n2)
+        r.update_node(n2, 6)
+        self.assertEqual(len(n1.claim), 2)
+        self.assertEqual(len(n2.claim), 6)
+        self.assertEqual(set(n1.claim) & set(n2.claim), set())
 
-    def test_add_10_nodes(self):
-        nodes = [Node("node_%d"%i, 8080, 1) for i in range(10)]
-        r = Ring(nodes)
+    def test_decrease_node(self):
+        n1 = Node("localhost", 8080)
+        n2 = Node("apansson", 8080)
+        r = Ring(8, n1)
+        r.add_node(n2)
+        r.update_node(n2, 2)
+        self.assertEqual(len(n1.claim), 6)
+        self.assertEqual(len(n2.claim), 2)
+        self.assertEqual(set(n1.claim) & set(n2.claim), set())
 
-        for vnode in r.vnodes:
-            preferred = r.preferred(vnode, 3)
-            self.assertEqual(3, len(preferred))
-            self.assertEqual(vnode, preferred[0])
-            for p in preferred[1:]:
-                self.assertTrue(p.node != vnode.node)            
+    def test_remove_node(self):
+        n1 = Node("localhost", 8080)
+        n2 = Node("apansson", 8080)
+        r = Ring(8, n1)
+        r.add_node(n2)
+        r.remove_node(n1)
+        self.assertEqual(len(n1.claim), 0)
+        self.assertEqual(len(n2.claim), 8)
+        self.assertTrue(n1 not in r.nodes)
 
-    def test_add_10_nodes_with_100_vnodes(self):
-        nodes = [Node("node_%d"%i, 8080, 100) for i in range(10)]
-        r = Ring(nodes)
-
-        for vnode in r.vnodes:
-            preferred = r.preferred(vnode, 3)
-            self.assertEqual(3, len(preferred))
-            self.assertEqual(vnode, preferred[0])
-            for p in preferred[1:]:
-                self.assertTrue(p.node != vnode.node)            
-
-    def test_walk(self):
-        nodes = [Node("node_%d"%i, 8080, 1) for i in range(10)]
-        r = Ring(nodes)
-
-        n = r.vnodes[3]
-        g = r._walk_cw(n._hash)
-        next = g.next()
-        self.assertEqual(next, r.vnodes[3])
-        g = r._walk_cw(n._hash-1)
-        next = g.next()
-        self.assertEqual(next, r.vnodes[3])
-        g = r._walk_cw(n._hash+1)
-        next = g.next()
-        self.assertEqual(next, r.vnodes[4])
-        g = r._walk_cw(0)
-        next = g.next()
-        self.assertEqual(next, r.vnodes[0])
-        g = r._walk_cw(r.vnodes[-1]._hash+1)
-        next = g.next()
-        self.assertEqual(next, r.vnodes[0])
-
-        for vnode in r.vnodes:
-            preferred = r.preferred(vnode, 3)
-            self.assertEqual(3, len(preferred))
-            self.assertEqual(vnode, preferred[0])
-            for p in preferred[1:]:
-                self.assertTrue(p.node != vnode.node)            
+    def test_preferred(self):
+        n = Node("localhost", 8080)
+        r = Ring(1024, n)
+        for i in range(16):
+            r.add_node(Node("node_%d"%i, 8080))
+        p = r.key_to_partition("foo")
+        preferred = r.preferred("foo", 3)
+        self.assertEqual(len(preferred), 3)
+        self.assertTrue(p in preferred[0].claim)        
 
 if __name__=="__main__":
     unittest.main()

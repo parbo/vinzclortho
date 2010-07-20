@@ -279,16 +279,17 @@ class MetaDataHandler(object):
 
     def do_GET(self, request):
         print "metadata requested"
-        return tc.succeed(ts.Response(200, None, pickle.dumps(self.context._metadata)))
+        return tc.succeed(ts.Response(200, None, bz2.compress(pickle.dumps(self.context._metadata))))
    
     def do_PUT(self, request):
         print "metadata submitted"
-        self.context.update_meta(pickle.loads(request.data))
+        self.context.update_meta(pickle.loads(bz2.decompress(request.data)))
         return tc.succeed(ts.Response(200, None, None))
 
 class VinzClortho(object):
     gossip_interval=30.0
-    N=3    
+    N=3
+    num_partitions=1024
     def __init__(self, addr, join, persistent):
         self.reactor = tc.Reactor()
         self.address = split_str_addr(addr)
@@ -296,7 +297,7 @@ class VinzClortho(object):
         self._vcid = self.address
         self._storage = LocalStorage(self.reactor, "%s:%d"%(self.host, self.port), persistent)
         self._metadata = None        
-        self._ring = None
+        self._node = chash.Node(self.host, self.port)
         self.create_ring(join)
         self._server = ts.AsyncHTTPServer(self.address, self,
                                           [(r"/store/(.*)", StoreHandler),
@@ -310,12 +311,10 @@ class VinzClortho(object):
             return RemoteStorage((node.host, node.port))
 
     def get_replicas(self, key):
-        return [self._get_replica(n.node, key) for n in self._ring.preferred_from_key(key, self.N)]
+        ring = self._metadata[1]["ring"]
+        preferred = ring.preferred(key, self.N)
+        return [self._get_replica(n, key) for n in preferred]
 
-    def _update_ring(self):
-        print "updating chash ring"
-        self._ring = chash.Ring([chash.Node(host, port, 100) for host, port in self._metadata[1]["ring"]])
-    
     def create_ring(self, join):
         if join:
             d = self.get_gossip(split_str_addr(join))
@@ -323,19 +322,18 @@ class VinzClortho(object):
         else:
             vc = vectorclock.VectorClock()
             vc.increment(self._vcid)
-            self._metadata = (vc, {"ring": [self.address]})
-            self._update_ring()
+            self._metadata = (vc, {"ring": chash.Ring(self.num_partitions, self._node)})
             self.schedule_gossip()
 
     def ring_joined(self, result):        
         self.schedule_gossip(0.0)
 
-    def gossip_received(self, node, response):
-        meta = pickle.loads(response.data)
+    def gossip_received(self, address, response):
+        meta = pickle.loads(bz2.decompress(response.data))
         if self.update_meta(meta):
-            print "update gossip", node
-            url = "http://%s:%d/_metadata"%node
-            d = tangled.client.request(url, command="PUT", data=pickle.dumps(self._metadata))
+            print "update gossip", address
+            url = "http://%s:%d/_metadata"%address
+            d = tangled.client.request(url, command="PUT", data=bz2.compress(pickle.dumps(self._metadata)))
             d.add_both(self.gossip_sent)
         else:
             self.schedule_gossip()
@@ -354,7 +352,6 @@ class VinzClortho(object):
                     print "received metadata is new", meta
                     # Accept new metadata
                     self._metadata = meta
-                    self._update_ring()                
                 else:
                     print "received metadata is the same"
             else:
@@ -364,21 +361,22 @@ class VinzClortho(object):
 
         # Add myself if needed
         ring = self._metadata[1]["ring"]
-        # maybe use a set instead?
-        if self.address not in ring:
-            print "add myself to metadata"
-            ring.append(self.address)
+        print [str(n) for n in ring.nodes]
+        if self._node not in ring.nodes:
+            ring.add_node(self._node)
             self._metadata[0].increment(self._vcid)
-            self._update_ring()
             old = True
+        print [str(n) for n in ring.nodes]
 
         return old
         
-    def random_other_node(self):
-        other = [n for n in self._metadata[1]["ring"] if n != self.address]
+    def random_other_node_address(self):
+        ring = self._metadata[1]["ring"]
+        other = [n for n in ring.nodes if n != self._node]
         if len(other) == 0:
             return None
-        return other[random.randint(0, len(other)-1)]
+        n = other[random.randint(0, len(other)-1)]
+        return n.host, n.port
 
     def schedule_gossip(self, timeout=None):
         if timeout is None:
@@ -393,13 +391,12 @@ class VinzClortho(object):
         print "gossip error"
         self.schedule_gossip()
 
-    def get_gossip(self, n=None):
-        node = n or self.random_other_node()
-        if node is not None:
-            print "gossip with", node
-            host, port = node
-            d = tangled.client.request("http://%s:%d/_metadata"%(host, port))
-            d.add_callbacks(functools.partial(self.gossip_received, node), self.gossip_error)
+    def get_gossip(self, a=None):
+        address = a or self.random_other_node_address()
+        if address is not None:
+            print "gossip with", address
+            d = tangled.client.request("http://%s:%d/_metadata"%address)
+            d.add_callbacks(functools.partial(self.gossip_received, address), self.gossip_error)
             return d            
 
     def run(self):
