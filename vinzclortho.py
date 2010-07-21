@@ -18,9 +18,10 @@ class InvalidContext(Exception):
 
 
 class LocalStorage(tc.Worker):
-    def __init__(self, reactor, name, persistent):
+    def __init__(self, reactor, name, partition, persistent):
         tc.Worker.__init__(self, reactor)
         self.name = name
+        self.partition = partition
         if persistent:
             self._store = store.BerkeleyDBStore("vc_store_" + name + ".db")
         else:
@@ -94,19 +95,19 @@ class LocalStoreHandler(object):
 
     def do_GET(self, request):
         key = request.groups[0]
-        d = self.parent._storage.get(key)
+        d = self.parent.local_get(key)
         d.add_callbacks(self._ok_get, self._error)
         return d
             
     def do_PUT(self, request):
         key = request.groups[0]
-        d = self.parent._storage.put(key, request.data)
+        d = self.parent.local_put(key, request.data)
         d.add_callbacks(self._ok, self._error)
         return d
             
     def do_DELETE(self, request):
         key = request.groups[0]
-        d = self.parent._storage.delete(key)
+        d = self.parent.local_delete(key)
         d.add_callbacks(self._ok, self._error)
         return d
 
@@ -294,8 +295,10 @@ class VinzClortho(object):
         self.reactor = tc.Reactor()
         self.address = split_str_addr(addr)
         self.host, self.port = self.address
+        self.persistent = persistent
         self._vcid = self.address
-        self._storage = LocalStorage(self.reactor, "%s:%d"%(self.host, self.port), persistent)
+        self._storage = {}
+        self._pending_shutdown_storage = []
         self._metadata = None        
         self._node = chash.Node(self.host, self.port)
         self.create_ring(join)
@@ -306,7 +309,7 @@ class VinzClortho(object):
 
     def _get_replica(self, node, key):
         if node.host == self.host and node.port == self.port:
-            return self._storage
+            return self.get_storage(key)
         else:
             return RemoteStorage((node.host, node.port))
 
@@ -314,6 +317,23 @@ class VinzClortho(object):
         ring = self._metadata[1]["ring"]
         preferred = ring.preferred(key, self.N)
         return [self._get_replica(n, key) for n in preferred]
+
+    def get_storage(self, key):
+        ring = self._metadata[1]["ring"]
+        p = ring.key_to_partition(key)
+        return self._storage.setdefault(p, LocalStorage(self.reactor, "%s:%d"%(self.host, self.port), p, self.persistent))
+
+    def local_get(self, key):
+        s = self.get_storage(key)
+        return s.get(key)
+
+    def local_put(self, key, value):
+        s = self.get_storage(key)
+        return s.put(key, value)
+
+    def local_delete(self, key):
+        s = self.get_storage(key)
+        return s.delete(key)
 
     def create_ring(self, join):
         if join:
@@ -340,10 +360,12 @@ class VinzClortho(object):
 
     def update_meta(self, meta):
         old = False
+        updated = False 
 
         # Update metadata as needed
         if self._metadata is None:
             self._metadata = meta
+            updated = True
         else:
             vc_new, meta_new = meta
             vc_curr, meta_curr = self._metadata
@@ -352,6 +374,7 @@ class VinzClortho(object):
                     print "received metadata is new", meta
                     # Accept new metadata
                     self._metadata = meta
+                    updated = True
                 else:
                     print "received metadata is the same"
             else:
@@ -361,12 +384,14 @@ class VinzClortho(object):
 
         # Add myself if needed
         ring = self._metadata[1]["ring"]
-        print [str(n) for n in ring.nodes]
         if self._node not in ring.nodes:
             ring.add_node(self._node)
             self._metadata[0].increment(self._vcid)
+            updated = True
             old = True
-        print [str(n) for n in ring.nodes]
+
+        if updated:
+            self.reactor.call_later(self.check_handoff, 0.0)            
 
         return old
         
@@ -397,7 +422,22 @@ class VinzClortho(object):
             print "gossip with", address
             d = tangled.client.request("http://%s:%d/_metadata"%address)
             d.add_callbacks(functools.partial(self.gossip_received, address), self.gossip_error)
-            return d            
+            return d
+
+    def do_handoff(self, node, storage, result):
+        print "TODO: handoff partition", storage.partition, "to node", node
+        return result
+
+    def check_handoff(self):
+        """Checks if any partitions that aren't claimed or replicated can be handed off"""
+        ring = self._metadata[1]["ring"]
+        # TODO: this is wrong, this hands off replicated data...
+        unclaimed_and_stored = set(self._storage.keys()) - set(self._node.claim) 
+        for p in unclaimed_and_stored:
+            n = ring.partition_to_node(p)
+            # request the metadata to see if it's alive
+            d = tangled.client.request("http://%s:%d/_metadata"%(n.host, n.port))
+            d.add_callback(functools.partial(self.do_handoff, n, self._storage[p]))
 
     def run(self):
         self.reactor.loop()

@@ -52,12 +52,29 @@ class Ring(object):
             n += 1
             start += 1 
 
+    def _walk_ccw(self, key):
+        """A generator that iterates all nodes backwards, starting at the hash value provided"""
+        start = self.key_to_partition(key)
+        n = 0
+        while n < len(self.partitions):
+            if start < 0:
+                start = len(self.partitions) - 1
+            yield self.partitions[start]
+            n += 1
+            start -= 1 
+
+    def claimed_or_replicated(self, node):
+        pass
+
+    def unclaimed(self, node):
+        return set(range(len(self.partitions))) - set(node.claim)
+
     def update_node(self, node, claim):
         """This will set the number of claimed partitions to 'claim'
         by stealing/giving partitions at random
         """
         if claim > len(node.claim):
-            unclaimed = set(range(len(self.partitions))) - set(node.claim)
+            unclaimed = self.unclaimed(node)
             while len(node.claim) != claim:
                 p = random_elem(list(unclaimed))
                 n = self.partitions[p]
@@ -101,7 +118,6 @@ class Ring(object):
             nodes.add(node)
             return False
         return list(itertools.islice(itertools.ifilterfalse(seen, self._walk_cw(key)), n))
-
 
 class TestConsistentHashing(unittest.TestCase):
     def test_new(self):
