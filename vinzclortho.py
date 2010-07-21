@@ -315,13 +315,13 @@ class VinzClortho(object):
 
     def get_replicas(self, key):
         ring = self._metadata[1]["ring"]
-        preferred = ring.preferred(key, self.N)
+        preferred, fallbacks = ring.preferred(key, self.N)
         return [self._get_replica(n, key) for n in preferred]
 
     def get_storage(self, key):
         ring = self._metadata[1]["ring"]
         p = ring.key_to_partition(key)
-        return self._storage.setdefault(p, LocalStorage(self.reactor, "%s:%d"%(self.host, self.port), p, self.persistent))
+        return self._storage.setdefault(p, LocalStorage(self.reactor, "%d@%s:%d"%(p, self.host, self.port), p, self.persistent))
 
     def local_get(self, key):
         s = self.get_storage(key)
@@ -391,6 +391,7 @@ class VinzClortho(object):
             old = True
 
         if updated:
+            self.reactor.call_later(self.update_storage, 0.0)            
             self.reactor.call_later(self.check_handoff, 0.0)            
 
         return old
@@ -424,6 +425,11 @@ class VinzClortho(object):
             d.add_callbacks(functools.partial(self.gossip_received, address), self.gossip_error)
             return d
 
+    def update_storage(self):
+        for p in self._node.claim:
+            if p not in self._storage:
+                self._storage[p] = LocalStorage(self.reactor, "%d@%s:%d"%(p, self.host, self.port), p, self.persistent)
+
     def do_handoff(self, node, storage, result):
         print "TODO: handoff partition", storage.partition, "to node", node
         return result
@@ -431,9 +437,8 @@ class VinzClortho(object):
     def check_handoff(self):
         """Checks if any partitions that aren't claimed or replicated can be handed off"""
         ring = self._metadata[1]["ring"]
-        # TODO: this is wrong, this hands off replicated data...
-        unclaimed_and_stored = set(self._storage.keys()) - set(self._node.claim) 
-        for p in unclaimed_and_stored:
+        to_handoff = set(self._storage.keys()) - set(self._node.claim) - ring.replicated(self._node, self.N) 
+        for p in to_handoff:
             n = ring.partition_to_node(p)
             # request the metadata to see if it's alive
             d = tangled.client.request("http://%s:%d/_metadata"%(n.host, n.port))
