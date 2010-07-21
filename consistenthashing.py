@@ -62,6 +62,11 @@ class Ring(object):
             n += 1
             start -= 1
 
+    def get_node(self, name):
+        for n in self.nodes:
+            if n.name == name:
+                return n
+
     def replicated(self, node):
         rep = set()
         for p in node.claim:

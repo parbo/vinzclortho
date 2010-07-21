@@ -5,6 +5,7 @@ import bz2
 import optparse
 import random
 import platform
+import collections
 import store
 import tangled.core as tc
 import tangled.client
@@ -17,28 +18,27 @@ class InvalidContext(Exception):
     pass
 
 
-class LocalStorage(tc.Worker):
-    def __init__(self, reactor, name, partition, persistent):
-        tc.Worker.__init__(self, reactor)
+class LocalStorage(object):
+    def __init__(self, worker, name, partition, persistent):
+        self.worker = worker
         self.name = name
         self.partition = partition
         if persistent:
             self._store = store.BerkeleyDBStore("vc_store_" + name + ".db")
         else:
             self._store = store.DictStore()
-        self.start()
 
     def __str__(self):
         return "LocalStorage(%s)"%self.name
 
     def get(self, key):
-        return self.defer(functools.partial(self._store.get, key))
+        return self.worker.defer(functools.partial(self._store.get, key))
 
     def put(self, key, value):
-        return self.defer(functools.partial(self._store.put, key, value))
+        return self.worker.defer(functools.partial(self._store.put, key, value))
     
     def delete(self, key):
-        return self.defer(functools.partial(self._store.delete, key))
+        return self.worker.defer(functools.partial(self._store.delete, key))
 
 
 class RemoteStorage(object):
@@ -290,9 +290,11 @@ class MetaDataHandler(object):
 class VinzClortho(object):
     gossip_interval=30.0
     N=3
-    num_partitions=1024
+    num_partitions=128
+    worker_pool_size=10
     def __init__(self, addr, join, persistent):
         self.reactor = tc.Reactor()
+        self.workers = [tc.Worker(self.reactor, True) for i in range(self.worker_pool_size)]
         self.address = split_str_addr(addr)
         self.host, self.port = self.address
         self.persistent = persistent
@@ -307,6 +309,9 @@ class VinzClortho(object):
                                            (r"/_localstore/(.*)", LocalStoreHandler),
                                            (r"/_metadata", MetaDataHandler)])
 
+    def _get_worker(self, num):
+        return self.workers[num % len(self.workers)]
+
     def _get_replica(self, node, key):
         if node.host == self.host and node.port == self.port:
             return self.get_storage(key)
@@ -315,13 +320,13 @@ class VinzClortho(object):
 
     def get_replicas(self, key):
         ring = self._metadata[1]["ring"]
-        preferred, fallbacks = ring.preferred(key, self.N)
+        preferred, fallbacks = ring.preferred(key)
         return [self._get_replica(n, key) for n in preferred]
 
     def get_storage(self, key):
         ring = self._metadata[1]["ring"]
         p = ring.key_to_partition(key)
-        return self._storage.setdefault(p, LocalStorage(self.reactor, "%d@%s:%d"%(p, self.host, self.port), p, self.persistent))
+        return self._storage.setdefault(p, LocalStorage(self._get_worker(p), "%d@%s:%d"%(p, self.host, self.port), p, self.persistent))
 
     def local_get(self, key):
         s = self.get_storage(key)
@@ -342,7 +347,7 @@ class VinzClortho(object):
         else:
             vc = vectorclock.VectorClock()
             vc.increment(self._vcid)
-            self._metadata = (vc, {"ring": chash.Ring(self.num_partitions, self._node)})
+            self._metadata = (vc, {"ring": chash.Ring(self.num_partitions, self._node, self.N)})
             self.schedule_gossip()
 
     def ring_joined(self, result):        
@@ -384,6 +389,7 @@ class VinzClortho(object):
 
         # Add myself if needed
         ring = self._metadata[1]["ring"]
+        # this just compares host and port, not the claim..
         if self._node not in ring.nodes:
             ring.add_node(self._node)
             self._metadata[0].increment(self._vcid)
@@ -391,6 +397,9 @@ class VinzClortho(object):
             old = True
 
         if updated:
+            # Grab the node since it might have been updated
+            self._node = ring.get_node(self._node.name)
+            print "Claim:", self._node.claim
             self.reactor.call_later(self.update_storage, 0.0)            
             self.reactor.call_later(self.check_handoff, 0.0)            
 
@@ -428,21 +437,24 @@ class VinzClortho(object):
     def update_storage(self):
         for p in self._node.claim:
             if p not in self._storage:
-                self._storage[p] = LocalStorage(self.reactor, "%d@%s:%d"%(p, self.host, self.port), p, self.persistent)
+                self._storage[p] = LocalStorage(self._get_worker(p), "%d@%s:%d"%(p, self.host, self.port), p, self.persistent)
 
-    def do_handoff(self, node, storage, result):
-        print "TODO: handoff partition", storage.partition, "to node", node
+    def do_handoff(self, node, partitions, result):
+        print "TODO: handoff partitions", partitions, "to node", node
         return result
 
     def check_handoff(self):
         """Checks if any partitions that aren't claimed or replicated can be handed off"""
         ring = self._metadata[1]["ring"]
-        to_handoff = set(self._storage.keys()) - set(self._node.claim) - ring.replicated(self._node, self.N) 
+        to_handoff = set(self._storage.keys()) - set(self._node.claim) - ring.replicated(self._node)
+        handoff_per_node = collections.defaultdict(list)
         for p in to_handoff:
             n = ring.partition_to_node(p)
+            handoff_per_node[n].append(p)
+        for n, plist in handoff_per_node.items():
             # request the metadata to see if it's alive
             d = tangled.client.request("http://%s:%d/_metadata"%(n.host, n.port))
-            d.add_callback(functools.partial(self.do_handoff, n, self._storage[p]))
+            d.add_callback(functools.partial(self.do_handoff, n, plist))
 
     def run(self):
         self.reactor.loop()

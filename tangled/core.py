@@ -25,11 +25,13 @@ def passthru(r):
     return r
 
 class Worker(threading.Thread):
-    def __init__(self, reactor):
+    def __init__(self, reactor, autostart=False):
         threading.Thread.__init__(self, target=self._runner)
         self._queue = Queue.Queue()
         self.daemon = True
         self.reactor = reactor
+        if autostart:
+            self.start()
 
     def _runner(self):
         while True:
