@@ -5,6 +5,7 @@ import socket
 import cStringIO
 import re
 import sys
+import uuid
 
 __version__ = "0.1"
 
@@ -54,7 +55,7 @@ class AsyncHTTPRequestHandler(asynchat.async_chat, BaseHTTPRequestHandler):
         self.rfile = None
         self.wfile = AsyncHTTPRequestHandler.Pusher(self)
         self.found_terminator = self.handle_request_line
-        self.request_version = "HTTP/1.1"
+        self.protocol_version = "HTTP/1.1"
         self.code = None
 
     def collect_incoming_data(self,data):
@@ -90,9 +91,29 @@ class AsyncHTTPRequestHandler(asynchat.async_chat, BaseHTTPRequestHandler):
         self.send_response(response.code)
         for k, v in response.headers.items():
             self.send_header(k, v)
-        self.end_headers()
-        if response.data:
-            self.push(response.data)
+        if not response.data:
+            self.end_headers()
+        else:
+            if isinstance(response.data, list):
+                boundary = str(uuid.uuid4())
+                self.send_header("Content-Type", "multipart/mixed; boundary=%s"%boundary)
+                # TODO: might be a good idea to use the 'email' module to create the message..
+                multidata = []
+                for data in response.data:
+                    multidata.append("\r\n--%s\r\n"%boundary)
+                    multidata.append("Content-Type: text/plain\r\n\r\n")
+                    multidata.append(data)
+                multidata.append("\r\n--%s--\r\n"%boundary)
+                multidata = "".join(multidata)
+                self.send_header("Content-Length", len(multidata))
+                self.end_headers()
+                self.push(multidata)
+            else:
+                if "Content-Length" not in response.headers:
+                    self.send_header("Content-Length", "%d"%len(response.data))
+                self.end_headers()
+                self.push(response.data)
+        
         self.close_when_done()
 
     def handle_request(self):
@@ -179,3 +200,19 @@ class AsyncHTTPServer(asyncore.dispatcher):
         # creates an instance of the handler class to handle the request/response
         # on the incoming connection
         AsyncHTTPRequestHandler(conn, addr, self)
+
+if __name__=="__main__":
+    import core
+    class MultiPartHandler(object):
+        def __init__(self, context):
+            pass
+        def do_GET(self, request):
+            return core.succeed(Response(300, None, ["elephant", "giraffe", "lion"]))
+    class NormalHandler(object):
+        def __init__(self, context):
+            pass
+        def do_GET(self, request):
+            return core.succeed(Response(200, None, "elephant\ngiraffe\nlion"))
+    server = AsyncHTTPServer(("localhost", 8080), None, [("/multipart", MultiPartHandler), ("/normal", NormalHandler)])
+    asyncore.loop()
+                                                         

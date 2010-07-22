@@ -204,8 +204,10 @@ class StoreHandler(object):
         resolved = vectorclock.resolve_list([result for replica, result in self.results])
         vc, value = resolved
         context = self._vc_to_context(vc)
-        # TODO: make sure the replica object returns str
-        self.response.callback(ts.Response(200, {"X-VinzClortho-Context": context}, str(value)))
+        code = 200
+        if isinstance(value, list):
+            code = 300
+        self.response.callback(ts.Response(code, {"X-VinzClortho-Context": context}, value))
 
     def _get_ok(self, replica, result):
         result = self._decode(result)
