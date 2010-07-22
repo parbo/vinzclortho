@@ -129,6 +129,20 @@ def resolve_list(c, joiner=_joiner):
         return _resolve(curr, rest[1:])
     return _resolve(c[0], c[1:])
 
+def resolve_list_extend(self, list_):
+    """Resolves the list of results to a unified result (which may be a list of concurrent versions)"""
+    def joiner(a, b):
+        """This way of joining concurrent versions makes it possible 
+        to store concurrent versions as lists, while still being able 
+        to return a single list for a request
+        """
+        if not isinstance(a, list):
+            a = [a]
+        if not isinstance(b, list):
+            b = [b]
+        return a + b              
+    return vectorclock.resolve_list(list_, joiner)        
+
 class TestVectorClock(unittest.TestCase):
     def test_empty_equals_empty(self):
         a = VectorClock()

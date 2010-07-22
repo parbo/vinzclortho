@@ -37,8 +37,41 @@ class LocalStorage(object):
     def put(self, key, value):
         return self.worker.defer(functools.partial(self._store.put, key, value))
     
+    def multi_put(self, kvlist, resolver):
+        return self.worker.defer(functools.partial(self._store.multi_put, kvlist, resolver))
+    
     def delete(self, key):
         return self.worker.defer(functools.partial(self._store.delete, key))
+
+    def _iterate_result(self, first, threshold, callback, result):
+        print "iterate result"
+        kvlist, iterator = result
+        if kvlist:
+            callback(kvlist)
+            d = self.worker.defer(functools.partial(self._store.iterate, iterator, threshold))
+            d.add_callbacks(functools.partial(self._iterate_result, False, threshold, callback), self._iterate_error)
+        else:
+            if first:
+                callback(kvlist)
+
+    def _iterate_error(self, failure):
+        failure.raise_exception()
+
+    def _iterator_ready(self, threshold, callback, iterator):
+        print "iterator ready"
+        d = self.worker.defer(functools.partial(self._store.iterate, iterator, threshold))
+        d.add_callbacks(functools.partial(self._iterate_result, True, threshold, callback), self._iterate_error)
+
+    def get_all(self, threshold, callback):
+        """This will call callback multiple times with a list of key/val tuples. 
+        The callback will be called whenever threshold bytes is accumulated 
+        (and also when all key/val tuples have been gathered). If the storage
+        is empty, the callback will be called with an empty list.
+         
+        This does *not* return a Deferred! 
+        """
+        d = self.worker.defer(self._store.get_iterator)
+        d.add_callbacks(functools.partial(self._iterator_ready, threshold, callback), self._iterate_error)        
 
 
 class RemoteStorage(object):
@@ -153,17 +186,7 @@ class StoreHandler(object):
         return request.groups[0], vc, client
 
     def _resolve(self):
-        """Resolves the list of results to a unified result (which may be a list of concurrent versions)"""
-        def joiner(a, b):
-            """This way of joining concurrent versions makes it possible 
-            to store concurrent versions as lists, while still being able 
-            to return a single list for a request"""
-            if not isinstance(a, list):
-                a = [a]
-            if not isinstance(b, list):
-                b = [b]
-            return a + b              
-        return vectorclock.resolve_list([result for replica, result in self.results], joiner)        
+        return vectorclock.resolve_list_extend([result for replica, result in self.results])        
 
     def _read_repair(self, result):
         if len(self.results) + len(self.failed) == len(self.replicas):
@@ -289,6 +312,21 @@ class MetaDataHandler(object):
         self.context.update_meta(pickle.loads(bz2.decompress(request.data)))
         return tc.succeed(ts.Response(200, None, None))
 
+class HandoffHandler(object):
+    def __init__(self, context):
+        self.context = context
+
+    def _put_complete(self, result):
+        return ts.Response(200, None, None)
+
+    def do_PUT(self, request):
+        kvlist = pickle.loads(bz2.decompress(request.data))
+        if not kvlist:
+            return tc.succeed(ts.Response(200, None, None))        
+        d = self.context.local_multi_put(kvlist)
+        d.add_both(self._put_complete)
+        return d
+
 class VinzClortho(object):
     gossip_interval=30.0
     N=3
@@ -301,15 +339,20 @@ class VinzClortho(object):
         self.host, self.port = self.address
         self.persistent = persistent
         self._vcid = self.address
-        self._storage = {}
-        self._pending_shutdown_storage = []
+        self._storage = {}        
+        self._pending_shutdown_storage = {}
         self._metadata = None        
         self._node = chash.Node(self.host, self.port)
         self.create_ring(join)
         self._server = ts.AsyncHTTPServer(self.address, self,
                                           [(r"/store/(.*)", StoreHandler),
                                            (r"/_localstore/(.*)", LocalStoreHandler),
+                                           (r"/_handoff", HandoffHandler),
                                            (r"/_metadata", MetaDataHandler)])
+
+    @property
+    def ring(self):
+        return self._metadata[1]["ring"]
 
     def _get_worker(self, num):
         return self.workers[num % len(self.workers)]
@@ -321,13 +364,11 @@ class VinzClortho(object):
             return RemoteStorage((node.host, node.port))
 
     def get_replicas(self, key):
-        ring = self._metadata[1]["ring"]
-        preferred, fallbacks = ring.preferred(key)
+        preferred, fallbacks = self.ring.preferred(key)
         return [self._get_replica(n, key) for n in preferred]
 
     def get_storage(self, key):
-        ring = self._metadata[1]["ring"]
-        p = ring.key_to_partition(key)
+        p = self.ring.key_to_partition(key)
         return self._storage.setdefault(p, LocalStorage(self._get_worker(p), "%d@%s:%d"%(p, self.host, self.port), p, self.persistent))
 
     def local_get(self, key):
@@ -337,6 +378,12 @@ class VinzClortho(object):
     def local_put(self, key, value):
         s = self.get_storage(key)
         return s.put(key, value)
+
+    def local_multi_put(self, kvlist):
+        def resolve(a, b):
+            return vectorclock.resolve_list_extend([a, b])
+        s = self.get_storage(kvlist[0][0])
+        return s.multi_put(kvlist, resolve)
 
     def local_delete(self, key):
         s = self.get_storage(key)
@@ -390,26 +437,30 @@ class VinzClortho(object):
                 # Reconcile?
 
         # Add myself if needed
-        ring = self._metadata[1]["ring"]
         # this just compares host and port, not the claim..
-        if self._node not in ring.nodes:
-            ring.add_node(self._node)
+        if self._node not in self.ring.nodes:
+            self.ring.add_node(self._node)
             self._metadata[0].increment(self._vcid)
             updated = True
             old = True
 
         if updated:
             # Grab the node since it might have been updated
-            self._node = ring.get_node(self._node.name)
-            print "Claim:", self._node.claim
+            self._node = self.ring.get_node(self._node.name)
+            print "Claimed:", len(self._node.claim), self._node.claim
+            r = set()
+            for p in self._node.claim:
+                r.update(self.ring.replicator_partitions(p))
+            print "Replicas:", len(r), r
+            r = self.ring.replicated(self._node)
+            print "Replicated:", len(r), r
             self.reactor.call_later(self.update_storage, 0.0)            
             self.reactor.call_later(self.check_handoff, 0.0)            
 
         return old
         
     def random_other_node_address(self):
-        ring = self._metadata[1]["ring"]
-        other = [n for n in ring.nodes if n != self._node]
+        other = [n for n in self.ring.nodes if n != self._node]
         if len(other) == 0:
             return None
         n = other[random.randint(0, len(other)-1)]
@@ -441,22 +492,39 @@ class VinzClortho(object):
             if p not in self._storage:
                 self._storage[p] = LocalStorage(self._get_worker(p), "%d@%s:%d"%(p, self.host, self.port), p, self.persistent)
 
+    def _partial_handoff(self, node, partition, kvlist):
+        if not kvlist:
+            # TODO: remove the db file etc
+            print "Shutdown", partition
+            del self._pending_shutdown_storage[partition]
+        else:
+            url = "http://%s:%d/_handoff"%(node.host, node.port)
+            d = tangled.client.request(url, command="PUT", data=bz2.compress(pickle.dumps(kvlist)))
+            print "Handoff", len(kvlist), "items from", partition, "to", node
+
     def do_handoff(self, node, partitions, result):
-        print "TODO: handoff partitions", partitions, "to node", node
+        print "Handing off", partitions
+        for p in partitions:
+            s = self._storage[p]
+            self._pending_shutdown_storage[p] = s
+            del self._storage[p]
+            s.get_all(1048576, functools.partial(self._partial_handoff, node, p))
         return result
+
+    def _handoff_error(self, failure):
+        failure.raise_exception()
 
     def check_handoff(self):
         """Checks if any partitions that aren't claimed or replicated can be handed off"""
-        ring = self._metadata[1]["ring"]
-        to_handoff = set(self._storage.keys()) - set(self._node.claim) - ring.replicated(self._node)
+        to_handoff = set(self._storage.keys()) - set(self._node.claim) - self.ring.replicated(self._node)
         handoff_per_node = collections.defaultdict(list)
         for p in to_handoff:
-            n = ring.partition_to_node(p)
+            n = self.ring.partition_to_node(p)
             handoff_per_node[n].append(p)
         for n, plist in handoff_per_node.items():
             # request the metadata to see if it's alive
             d = tangled.client.request("http://%s:%d/_metadata"%(n.host, n.port))
-            d.add_callback(functools.partial(self.do_handoff, n, plist))
+            d.add_callbacks(functools.partial(self.do_handoff, n, plist), self._handoff_error)
 
     def run(self):
         self.reactor.loop()

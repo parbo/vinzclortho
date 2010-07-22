@@ -1,7 +1,21 @@
 import sqlite3
 import bsddb
+import unittest
 
-class DictStore(object):
+class Store(object):
+    def multi_put(self, kvlist, resolver):
+        for k, v in kvlist:
+            try:
+                v_curr = self.get(k)
+                v = resolver(v, v_curr)
+            except KeyError:
+                pass
+            # TODO: probably should check if the value was changed...
+            print "multi put", k, v
+            self.put(k, v)
+    
+
+class DictStore(Store):
     def __init__(self):
         self._store = {}
 
@@ -14,7 +28,22 @@ class DictStore(object):
     def delete(self, key):
         del self._store[key]
 
-class BerkeleyDBStore(object):
+    def get_iterator(self):
+        return self._store.iteritems()
+
+    def iterate(self, iterator, threshold):
+        tot = 0
+        ret = []
+        try:            
+            while tot < threshold:
+                k, v = iterator.next()
+                tot = tot + len(k) + len(v)
+                ret.append((k, v))
+            return ret, iterator
+        except StopIteration:
+            return ret, iterator
+
+class BerkeleyDBStore(Store):
     def __init__(self, filename):
         self._store = bsddb.btopen(filename)
 
@@ -29,43 +58,103 @@ class BerkeleyDBStore(object):
         del self._store[key]
         self._store.sync()
 
-class SQLiteStore(object):
+    def get_iterator(self):
+        k, v = self._store.first()
+        return k
+
+    def iterate(self, iterator, threshold):
+        if iterator is None:
+            return [], None
+        iterator, v = self._store.set_location(iterator)
+        tot = 0
+        ret = [(iterator, v)]        
+        try:            
+            while tot < threshold:
+                iterator, v = self._store.next()
+                tot = tot + len(iterator) + len(v)
+                ret.append((iterator, v))
+            return ret, iterator
+        except bsddb.error as e:
+            return ret, None
+        
+
+class SQLiteStore(Store):
     def __init__(self, filename):
         self._db = filename
-        conn = sqlite3.connect(self._db)
-        c = conn.cursor()
+        self.conn = sqlite3.connect(self._db)
+        c = self.conn.cursor()
         # Create table
         c.execute("CREATE TABLE IF NOT EXISTS blobkey(k BLOB PRIMARY KEY, v BLOB)")
-        conn.commit()
+        self.conn.commit()
         c.close()
-        conn.close()
 
     def put(self, key, value):
-        conn = sqlite3.connect(self._db)
-        c = conn.cursor()
+        c = self.conn.cursor()
         c.execute("INSERT OR REPLACE INTO blobkey(k, v) VALUES(?, ?)", (key, sqlite3.Binary(value)))
-        conn.commit()
+        self.conn.commit()
         c.close()
-        conn.close()
 
     def get(self, key):
-        conn = sqlite3.connect(self._db)
-        c = conn.cursor()
+        c = self.conn.cursor()
         c.execute("SELECT v FROM blobkey WHERE k = ?", (key,))
         value = c.fetchone()
         c.close()
-        conn.close()
         if value is None:
             raise KeyError(key)
         return value[0]
 
     def delete(self, key):
-        conn = sqlite3.connect(self._db)
-        c = conn.cursor()
+        c = self.conn.cursor()
         c.execute("DELETE FROM blobkey WHERE k = ?", (key,))
-        conn.commit()
+        self.conn.commit()
         rows = c.rowcount
         c.close()
-        conn.close()
         if rows == 0:
             raise KeyError
+
+    def get_iterator(self):
+        c = self.conn.cursor()
+        c.execute("SELECT k, v FROM blobkey")
+        return c
+
+    def iterate(self, iterator, threshold):
+        tot = 0
+        ret = []        
+        try:            
+            while tot < threshold:
+                k, v = iterator.next()
+                tot = tot + len(k) + len(v)
+                ret.append((k, v))
+            return ret, iterator
+        except StopIteration:
+            return ret, iterator
+
+class TestStores(unittest.TestCase):
+    def _test_iterate(self, d):
+        contents = [("Key_%d"%i, "Val_%d"%i) for i in range(100)]
+        for k, v in contents:
+            d.put(k, v)
+        iterator = d.get_iterator()
+        kvlist = []
+        while True:
+            kv, iterator = d.iterate(iterator, 100)
+            if not kv:
+                break
+            kvlist.extend(kv)
+        self.assertEqual(set(contents), set([(str(k), str(v)) for k, v in kvlist]))
+
+    def test_iterate_dict(self):
+        d = DictStore()
+        self._test_iterate(d)
+
+    def test_iterate_bdb(self):
+        d = BerkeleyDBStore("bdb")
+        self._test_iterate(d)
+
+    def test_iterate_sqlite(self):
+        d = SQLiteStore("sqlite")
+        self._test_iterate(d)
+
+if __name__=="__main__":
+    unittest.main()
+

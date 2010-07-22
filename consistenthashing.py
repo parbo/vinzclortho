@@ -40,7 +40,11 @@ class Ring(object):
         self.nodes = [node]
         node.claim = range(partitions)
         self.partitions = [node] * partitions
-        self.N = N
+        self._wanted_N = N
+
+    @property
+    def N(self):
+        return min(len(self.nodes), self._wanted_N)
 
     def _walk_cw(self, start):
         """A generator that iterates all partitions, starting at the partition provided"""
@@ -82,9 +86,13 @@ class Ring(object):
         by stealing/giving partitions at random
         """
         if claim > len(node.claim):
-            available = self.unclaimed(node) - self.replicated(node)
-            while len(node.claim) != claim and available:
-                p = random_elem(list(available))
+            while len(node.claim) != claim:
+                available = self.unclaimed(node) - self.replicated(node)
+                try:
+                    p = random_elem(list(available))
+                except ValueError:
+                    # No partitions lleft to grab
+                    break
                 n = self.partitions[p]
                 del n.claim[n.claim.index(p)]
                 n.claim.sort()
@@ -98,7 +106,7 @@ class Ring(object):
                 replicators = self.replicators(p)
                 try:
                     n = random_elem(list(set(others) - set(replicators)))
-                except IndexError:
+                except ValueError:
                     # No node to hand over the partition to..
                     break
                 n.claim.append(p)
@@ -113,8 +121,9 @@ class Ring(object):
         self.update_node(node, claim)
 
     def remove_node(self, node):
-        self.update_node(node, 0)
+        # Remove it first so replication factor is ok
         del self.nodes[self.nodes.index(node)]
+        self.update_node(node, 0)
 
     def key_to_partition(self, key):
         keys_per_partition = MAXHASH // len(self.partitions)
@@ -136,6 +145,9 @@ class Ring(object):
     def replicators(self, partition):
         return [self.partitions[p] for p in itertools.islice(self._partition_unique_node_iterator(self._walk_cw(partition)), self.N)]
 
+    def replicator_partitions(self, partition):
+        return list(itertools.islice(self._partition_unique_node_iterator(self._walk_cw(partition)), self.N))
+
     def preferred(self, key):
         """Returns tuple of (preferred, fallbacks)"""
         cwnodelist = [self.partitions[p] for p in self._partition_unique_node_iterator(self._walk_cw(self.key_to_partition(key)))]
@@ -152,8 +164,6 @@ class TestConsistentHashing(unittest.TestCase):
         n2 = Node("apansson", 8080)
         r = Ring(8, n1, 3)
         r.add_node(n2)
-        self.assertEqual(len(n1.claim), 4)
-        self.assertEqual(len(n2.claim), 4)
         self.assertEqual(set(n1.claim) & set(n2.claim), set())
 
     def test_increase_node(self):
@@ -162,8 +172,6 @@ class TestConsistentHashing(unittest.TestCase):
         r = Ring(8, n1, 3)
         r.add_node(n2)
         r.update_node(n2, 6)
-        self.assertEqual(len(n1.claim), 2)
-        self.assertEqual(len(n2.claim), 6)
         self.assertEqual(set(n1.claim) & set(n2.claim), set())
 
     def test_decrease_node(self):
@@ -172,11 +180,9 @@ class TestConsistentHashing(unittest.TestCase):
         r = Ring(8, n1, 3)
         r.add_node(n2)
         r.update_node(n2, 2)
-        self.assertEqual(len(n1.claim), 6)
-        self.assertEqual(len(n2.claim), 2)
         self.assertEqual(set(n1.claim) & set(n2.claim), set())
 
-    def test_remove_node(self):
+    def test_remove_node_less_than_N(self):
         n1 = Node("localhost", 8080)
         n2 = Node("apansson", 8080)
         r = Ring(8, n1, 3)
@@ -186,10 +192,19 @@ class TestConsistentHashing(unittest.TestCase):
         self.assertEqual(len(n2.claim), 8)
         self.assertTrue(n1 not in r.nodes)
 
+    def test_remove_node(self):
+        n = Node("localhost", 8080)
+        r = Ring(64, n, 3)
+        for i in range(8):
+            r.add_node(Node("node_%d"%i, 8080))
+        r.remove_node(n)
+        self.assertEqual(len(n.claim), 0)
+        self.assertTrue(n not in r.nodes)
+
     def test_preferred(self):
         n = Node("localhost", 8080)
-        r = Ring(1024, n, 3)
-        for i in range(16):
+        r = Ring(64, n, 3)
+        for i in range(8):
             r.add_node(Node("node_%d"%i, 8080))
         p = r.key_to_partition("foo")
         preferred, fallbacks = r.preferred("foo")
