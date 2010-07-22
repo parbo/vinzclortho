@@ -83,7 +83,7 @@ class Ring(object):
         """
         if claim > len(node.claim):
             available = self.unclaimed(node) - self.replicated(node)
-            while len(node.claim) != claim:
+            while len(node.claim) != claim and available:
                 p = random_elem(list(available))
                 n = self.partitions[p]
                 del n.claim[n.claim.index(p)]
@@ -95,7 +95,12 @@ class Ring(object):
             others = [n for n in self.nodes if n != node]
             while len(node.claim) != claim:
                 p = node.claim.pop(0)
-                n = random_elem(others)
+                replicators = self.replicators(p)
+                try:
+                    n = random_elem(list(set(others) - set(replicators)))
+                except IndexError:
+                    # No node to hand over the partition to..
+                    break
                 n.claim.append(p)
                 n.claim.sort()
                 self.partitions[p] = n
@@ -127,6 +132,9 @@ class Ring(object):
             nodes.add(node)
             return False
         return itertools.ifilterfalse(seen, iterator)
+
+    def replicators(self, partition):
+        return [self.partitions[p] for p in itertools.islice(self._partition_unique_node_iterator(self._walk_cw(partition)), self.N)]
 
     def preferred(self, key):
         """Returns tuple of (preferred, fallbacks)"""
