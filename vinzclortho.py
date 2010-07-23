@@ -45,7 +45,6 @@ class LocalStorage(object):
         return self.worker.defer(functools.partial(self._store.delete, key))
 
     def _iterate_result(self, first, threshold, callback, result):
-        print "iterate result"
         kvlist, iterator = result
         if kvlist:
             callback(kvlist)
@@ -59,7 +58,6 @@ class LocalStorage(object):
         failure.raise_exception()
 
     def _iterator_ready(self, threshold, callback, iterator):
-        print "iterator ready"
         d = self.worker.defer(functools.partial(self._store.iterate, iterator, threshold))
         d.add_callbacks(functools.partial(self._iterate_result, True, threshold, callback), self._iterate_error)
 
@@ -204,7 +202,6 @@ class StoreHandler(object):
         return result
 
     def _read_quorum_acheived(self):
-        print "Read quorum?", len(self.results), self.R
         return len(self.results) >= self.R
 
     def _write_quorum_acheived(self):
@@ -256,7 +253,6 @@ class StoreHandler(object):
         self.response = tc.Deferred()
         self.key = request.groups[0]
         self.replicas = self.parent.get_replicas(self.key)
-        print "Replicas:", self.replicas
         for r in self.replicas:
             d = r.get(self.key)
             d.add_callbacks(functools.partial(self._get_ok, r), 
