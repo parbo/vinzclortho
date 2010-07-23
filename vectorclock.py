@@ -129,7 +129,7 @@ def resolve_list(c, joiner=_joiner):
         return _resolve(curr, rest[1:])
     return _resolve(c[0], c[1:])
 
-def resolve_list_extend(self, list_):
+def resolve_list_extend(list_):
     """Resolves the list of results to a unified result (which may be a list of concurrent versions)"""
     def joiner(a, b):
         """This way of joining concurrent versions makes it possible 
