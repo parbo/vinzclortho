@@ -9,6 +9,12 @@ def hashval(s):
 
 MAXHASH=((2**160)-1)
 
+def pop_random_elem(list_):
+    ix = random.randint(0, len(list_)-1)
+    val = list_[ix]
+    del list_[ix]
+    return val
+
 def random_elem(list_):
     return list_[random.randint(0, len(list_)-1)]
 
@@ -16,6 +22,7 @@ class Node(object):
     def __init__(self, host, port):
         self.host = host
         self.port = port
+        self.wanted = 0
         self.claim = []
 
     def __eq__(self, rhs):
@@ -40,17 +47,17 @@ class Ring(object):
         self.nodes = [node]
         node.claim = range(partitions)
         self.partitions = [node] * partitions
+        self.num_partitions = partitions
+        self._partition_set = set(range(partitions))
         self._wanted_N = N
-
-    @property
-    def N(self):
-        return min(len(self.nodes), self._wanted_N)
+        self.N = len(self.nodes)
 
     def _walk_cw(self, start):
         """A generator that iterates all partitions, starting at the partition provided"""
         n = 0
-        while n < len(self.partitions):
-            if start >= len(self.partitions):
+        sz = self.num_partitions
+        while n < sz:
+            if start >= sz:
                 start = 0
             yield start
             n += 1
@@ -59,9 +66,10 @@ class Ring(object):
     def _walk_ccw(self, start):
         """A generator that iterates all partitions backwards, starting at the partition provided"""
         n = 0
-        while n < len(self.partitions):
+        sz = self.num_partitions
+        while n < sz:
             if start < 0:
-                start = len(self.partitions) - 1
+                start = sz - 1
             yield start
             n += 1
             start -= 1
@@ -74,83 +82,130 @@ class Ring(object):
     def replicated(self, node):
         rep = set()
         for p in node.claim:
-            for p_ in itertools.islice(self._partition_unique_node_iterator(self._walk_ccw(p)), 1, self.N):
+            for p_ in itertools.islice(self._walk_ccw(p), 1, self.N):
                 rep.add(p_)
         return rep
 
-    def unclaimed(self, node):
-        return set(range(len(self.partitions))) - set(node.claim)
+    def _neighbours(self, p):
+        sz = self.num_partitions
+        return [n%sz for n in range(p-self.N+1, p+self.N)]
 
-    def update_node(self, node, claim):
+    def _replicated_in(self, p):
+        sz = self.num_partitions
+        return [n%sz for n in range(p-self.N+1, p)]
+
+    def unwanted(self, claim):
+        r = set()
+        for p in claim:
+            r.update(self._neighbours(p))
+        return r
+
+    def _swap(self, p1, p2):
+        """This swaps owner of p1 and p2"""        
+        n1 = self.partitions[p1]
+        n2 = self.partitions[p2]
+        n1.claim.remove(p1)
+        n1.claim.append(p2)
+        n1.claim.sort()
+        n2.claim.remove(p2)
+        n2.claim.append(p1)
+        n2.claim.sort()
+        self.partitions[p2] = n1
+        self.partitions[p1] = n2
+
+    def fix_constraint(self):
+        # Check that replicas are on separate nodes
+        for p in range(self.num_partitions):
+            node = self.partitions[p]
+            rep = [self.partitions[p_] for p_ in self._replicated_in(p)]
+            if node in rep:
+                g = self._walk_cw(p)
+                g.next()
+                for p_ in g:
+                    if self.partitions[p_] not in rep:
+                        self._swap(p, p_)
+                        break
+
+    def update_claim(self):
+        # Check that all nodes have roughly the claim they wanted..
+        for n in self.nodes:            
+            if abs(len(n.claim)-n.wanted) > 3: # arbitrary thresholds ftw!
+                self.update_node(n, n.wanted)
+
+    def ok(self):
+        for n in self.nodes:
+            for i, p in enumerate(n.claim):
+                d = abs(p-n.claim[i-1])
+                if d < self.N - 1:
+                    return False
+        return True
+
+    def update_node(self, node, claim, force=False):
         """This will set the number of claimed partitions to 'claim'
         by stealing/giving partitions at random
         """
-        if claim > len(node.claim):
-            while len(node.claim) != claim:
-                available = self.unclaimed(node) - self.replicated(node)
-                try:
-                    p = random_elem(list(available))
-                except ValueError:
-                    # No partitions lleft to grab
+        node.wanted = claim
+        unwanted = self.unwanted(node.claim)
+        while claim > len(node.claim):
+            available = self._partition_set - unwanted
+            try:
+                p = random_elem(list(available))
+            except ValueError:
+                # No partitions left to grab
+                break
+            n = self.partitions[p]
+            n.claim.remove(p)
+            n.claim.sort()
+            node.claim.append(p)
+            node.claim.sort()
+            self.partitions[p] = node
+            for p_ in self._neighbours(p):
+                unwanted.add(p_)
+
+        while claim < len(node.claim):
+            p_from = random_elem(node.claim)
+            available_nodes = set(self.nodes) - set([self.partitions[p] for p in self._neighbours(p_from)])
+            try:
+                n = random_elem(list(available_nodes))
+            except ValueError:
+                # no node could take it without breaking the replication constraint
+                if force:
+                    # hand it to one anyway
+                    n = random_elem(list(set(self.nodes) - set([node])))
+                else:
                     break
-                n = self.partitions[p]
-                del n.claim[n.claim.index(p)]
-                n.claim.sort()
-                node.claim.append(p)
-                self.partitions[p] = node
-                available.remove(p)
-        elif claim < len(node.claim):
-            others = [n for n in self.nodes if n != node]
-            while len(node.claim) != claim:
-                p = node.claim.pop(0)
-                replicators = self.replicators(p)
-                try:
-                    n = random_elem(list(set(others) - set(replicators)))
-                except ValueError:
-                    # No node to hand over the partition to..
-                    break
-                n.claim.append(p)
-                n.claim.sort()
-                self.partitions[p] = n
-        node.claim.sort()
+            n.claim.append(p_from)
+            n.claim.sort()
+            node.claim.remove(p_from)
+            node.claim.sort()
+            self.partitions[p_from] = n
 
     def add_node(self, node, claim=None):
         assert node not in self.nodes
         self.nodes.append(node)
-        claim = claim or (len(self.partitions) // len(self.nodes))
+        self.N = min(len(self.nodes), self._wanted_N)
+        claim = claim or (self.num_partitions // len(self.nodes))
         self.update_node(node, claim)
+        if not self.ok():
+            self.fix_constraint()
 
     def remove_node(self, node):
-        # Remove it first so replication factor is ok
+        self.update_node(node, 0, True)
         del self.nodes[self.nodes.index(node)]
-        self.update_node(node, 0)
+        self.N = min(len(self.nodes), self._wanted_N)
+        if not self.ok():
+            self.fix_constraint()
 
     def key_to_partition(self, key):
-        keys_per_partition = MAXHASH // len(self.partitions)
+        keys_per_partition = MAXHASH // self.num_partitions
         return hashval(key) // keys_per_partition
 
     def partition_to_node(self, partition):
         return self.partitions[partition]
 
-    def _partition_unique_node_iterator(self, iterator):
-        nodes = set()
-        def seen(partition):
-            node = self.partitions[partition]
-            if node in nodes:
-                return True
-            nodes.add(node)
-            return False
-        return itertools.ifilterfalse(seen, iterator)
-
-    def replicators(self, partition):
-        return [self.partitions[p] for p in itertools.islice(self._partition_unique_node_iterator(self._walk_cw(partition)), self.N)]
-
-    def replicator_partitions(self, partition):
-        return list(itertools.islice(self._partition_unique_node_iterator(self._walk_cw(partition)), self.N))
-
     def preferred(self, key):
         """Returns tuple of (preferred, fallbacks)"""
-        cwnodelist = [self.partitions[p] for p in self._partition_unique_node_iterator(self._walk_cw(self.key_to_partition(key)))]
+        cwnodelist = [self.partitions[p] for p in self._walk_cw(self.key_to_partition(key))]
         return cwnodelist[:self.N], cwnodelist[self.N:]
 
 class TestConsistentHashing(unittest.TestCase):
@@ -158,6 +213,7 @@ class TestConsistentHashing(unittest.TestCase):
         n = Node("localhost", 8080)
         r = Ring(8, n, 3)
         self.assertEqual(n.claim, range(8))
+        self
 
     def test_add_node(self):
         n1 = Node("localhost", 8080)
@@ -166,6 +222,13 @@ class TestConsistentHashing(unittest.TestCase):
         r.add_node(n2)
         self.assertEqual(set(n1.claim) & set(n2.claim), set())
 
+    def test_add_many_nodes(self):
+        n = Node("localhost", 8080)
+        r = Ring(1024, n, 3)
+        for i in range(64):
+            r.add_node(Node("node_%d"%i, 8080))
+        self.assertTrue(r.ok())
+            
     def test_increase_node(self):
         n1 = Node("localhost", 8080)
         n2 = Node("apansson", 8080)
@@ -213,11 +276,13 @@ class TestConsistentHashing(unittest.TestCase):
 
     def test_replicated(self):
         n = Node("localhost", 8080)
-        r = Ring(64, n, 3)
+        r = Ring(128, n, 3)
         for i in range(8):
             r.add_node(Node("node_%d"%i, 8080))
-        rep = r.replicated(n)
-        self.assertEqual(rep & set(n.claim), set())
+        for i, n in enumerate(r.nodes):
+            rep = r.replicated(n)
+            self.assertEqual(rep & set(n.claim), set())
+        
 
 if __name__=="__main__":
     unittest.main()
