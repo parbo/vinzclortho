@@ -234,6 +234,7 @@ class Trigger(asyncore.dispatcher):
 class Reactor(object):
     # trigger object to wake the loop
     _trigger = Trigger()
+    use_poll = False
     
     def __init__(self):
         self._pending_calls = []
@@ -264,7 +265,7 @@ class Reactor(object):
         return max(0, self._pending_calls[0][0] - time.time())
 
     def loop(self):
-        if hasattr(select, 'poll'):
+        if self.use_poll and hasattr(select, 'poll'):
             poll_fun = asyncore.poll2
         else:
             poll_fun = asyncore.poll
