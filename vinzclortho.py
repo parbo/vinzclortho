@@ -6,6 +6,7 @@ import optparse
 import random
 import platform
 import collections
+import sys
 import store
 import tangled.core as tc
 import tangled.client
@@ -327,12 +328,38 @@ class HandoffHandler(object):
         d.add_both(self._put_complete)
         return d
 
+class AdminHandler(object):
+    def __init__(self, context):
+        self.context = context
+
+    def do_GET(self, request):
+        service = request.groups[0]
+        if service == "claim":
+            return tc.succeed(ts.Response(200, None, str(self.context.get_claim())))
+        return tc.succeed(ts.Response(404))
+
+    def do_PUT(self, request):
+        service = request.groups[0]        
+        if service == "claim":
+            try:
+                claim = int(request.data)
+                self.context.update_claim(claim)
+                return tc.succeed(ts.Response(200))
+            except ValueError:
+                return tc.succeed(ts.Response(400))
+        elif service == "balance":
+            self.context.balance()
+            return tc.succeed(ts.Response(200))
+        return tc.succeed(ts.Response(404))
+
+    do_PUSH = do_PUT
+
 class VinzClortho(object):
     gossip_interval=30.0
     N=3
     num_partitions=128
     worker_pool_size=10
-    def __init__(self, addr, join, persistent):
+    def __init__(self, addr, join, claim, persistent):
         self.reactor = tc.Reactor()
         self.workers = [tc.Worker(self.reactor, True) for i in range(self.worker_pool_size)]
         self.address = split_str_addr(addr)
@@ -343,12 +370,15 @@ class VinzClortho(object):
         self._pending_shutdown_storage = {}
         self._metadata = None        
         self._node = chash.Node(self.host, self.port)
+        self._claim = claim                          
         self.create_ring(join)
         self._server = ts.AsyncHTTPServer(self.address, self,
                                           [(r"/store/(.*)", StoreHandler),
                                            (r"/_localstore/(.*)", LocalStoreHandler),
                                            (r"/_handoff", HandoffHandler),
-                                           (r"/_metadata", MetaDataHandler)])
+                                           (r"/_metadata", MetaDataHandler),
+                                           (r"/admin/(.*)", AdminHandler)])
+        self.reactor.call_later(self.check_shutdown, 30.0)
 
     @property
     def ring(self):
@@ -362,6 +392,30 @@ class VinzClortho(object):
             return self.get_storage(key)
         else:
             return RemoteStorage((node.host, node.port))
+
+    def check_shutdown(self):
+        if not self._storage and not self._pending_shutdown_storage:
+            for w in self.workers:
+                w.stop()
+                w.join()
+            # fugly way, but it works
+            sys.exit(0)
+        self.reactor.call_later(self.check_shutdown, 5.0)
+
+    def get_claim(self):
+        return len(self._node.claim)
+
+    def balance(self):
+        self.ring.update_claim()
+        self._metadata[0].increment(self._vcid)
+        self.reactor.call_later(self.update_storage, 0.0)            
+        self.reactor.call_later(self.check_handoff, 0.0)            
+        self.schedule_gossip(0.0)       
+
+    def update_claim(self, claim):
+        force = (claim == 0)
+        self.ring.update_node(self._node, claim, force)
+        self.balance()
 
     def get_replicas(self, key):
         preferred, fallbacks = self.ring.preferred(key)
@@ -397,9 +451,10 @@ class VinzClortho(object):
             vc = vectorclock.VectorClock()
             vc.increment(self._vcid)
             self._metadata = (vc, {"ring": chash.Ring(self.num_partitions, self._node, self.N)})
+            self.reactor.call_later(self.update_storage, 0.0)
             self.schedule_gossip()
 
-    def ring_joined(self, result):        
+    def ring_joined(self, result):
         self.schedule_gossip(0.0)
 
     def gossip_received(self, address, response):
@@ -439,7 +494,7 @@ class VinzClortho(object):
         # Add myself if needed
         # this just compares host and port, not the claim..
         if self._node not in self.ring.nodes:
-            self.ring.add_node(self._node)
+            self.ring.add_node(self._node, self._claim)
             self._metadata[0].increment(self._vcid)
             updated = True
             old = True
@@ -448,15 +503,8 @@ class VinzClortho(object):
             # Grab the node since it might have been updated
             self._node = self.ring.get_node(self._node.name)
             print "Claimed:", len(self._node.claim), self._node.claim
-            r = set()
-            for p in self._node.claim:
-                r.update(self.ring.replicator_partitions(p))
-            print "Replicas:", len(r), r
-            r = self.ring.replicated(self._node)
-            print "Replicated:", len(r), r
             self.reactor.call_later(self.update_storage, 0.0)            
             self.reactor.call_later(self.check_handoff, 0.0)            
-
         return old
         
     def random_other_node_address(self):
@@ -546,8 +594,10 @@ if __name__ == '__main__':
                       help="Bind to ADDRESS", metavar="ADDRESS")
     parser.add_option("-j", "--join", dest="join",
                       help="Bind to ADDRESS", metavar="ADDRESS")
+    parser.add_option("-c", "--claim", dest="claim",
+                      help="Number of partitions to claim")
     (options, args) = parser.parse_args()    
 
     print 'Starting server, use <Ctrl-C> to stop'
-    vc = VinzClortho(options.address, options.join, True)
+    vc = VinzClortho(options.address, options.join, options.claim, True)
     vc.run()

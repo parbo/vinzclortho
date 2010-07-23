@@ -22,7 +22,7 @@ class Node(object):
     def __init__(self, host, port):
         self.host = host
         self.port = port
-        self.wanted = 0
+        self.wanted = None
         self.claim = []
 
     def __eq__(self, rhs):
@@ -127,9 +127,11 @@ class Ring(object):
                         break
 
     def update_claim(self):
+        print "update claim"
         # Check that all nodes have roughly the claim they wanted..
         for n in self.nodes:            
-            if abs(len(n.claim)-n.wanted) > 3: # arbitrary thresholds ftw!
+            want = n.wanted or (self.num_partitions // len(self.nodes))
+            if abs(len(n.claim)-want) > 3: # arbitrary thresholds ftw!
                 self.update_node(n, n.wanted)
 
     def ok(self):
@@ -144,7 +146,9 @@ class Ring(object):
         """This will set the number of claimed partitions to 'claim'
         by stealing/giving partitions at random
         """
+        print "updating node", node, claim, force
         node.wanted = claim
+        claim = claim or (self.num_partitions // len(self.nodes))
         unwanted = self.unwanted(node.claim)
         while claim > len(node.claim):
             available = self._partition_set - unwanted
@@ -163,6 +167,7 @@ class Ring(object):
                 unwanted.add(p_)
 
         while claim < len(node.claim):
+            print claim, len(node.claim)
             p_from = random_elem(node.claim)
             available_nodes = set(self.nodes) - set([self.partitions[p] for p in self._neighbours(p_from)])
             try:
@@ -173,6 +178,7 @@ class Ring(object):
                     # hand it to one anyway
                     n = random_elem(list(set(self.nodes) - set([node])))
                 else:
+                    print "could not handover..", claim, len(node.claim)
                     break
             n.claim.append(p_from)
             n.claim.sort()
@@ -184,7 +190,6 @@ class Ring(object):
         assert node not in self.nodes
         self.nodes.append(node)
         self.N = min(len(self.nodes), self._wanted_N)
-        claim = claim or (self.num_partitions // len(self.nodes))
         self.update_node(node, claim)
         if not self.ok():
             self.fix_constraint()

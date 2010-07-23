@@ -28,13 +28,17 @@ class Worker(threading.Thread):
     def __init__(self, reactor, autostart=False):
         threading.Thread.__init__(self, target=self._runner)
         self._queue = Queue.Queue()
-        self.daemon = True
         self.reactor = reactor
+        self._running = True
+        self.daemon = True
         if autostart:
             self.start()
 
+    def stop(self):
+        self._running = False
+
     def _runner(self):
-        while True:
+        while self._running:
             try:
                 func, oncomplete = self._queue.get(block=True, timeout=1)
             except Queue.Empty:
@@ -62,6 +66,9 @@ class Failure(object):
             self.type = type_
             self.value = None
             self.tb = None
+
+    def __str__(self):
+        return "%s %s %s"%(self.type, self.value, self.tb)
 
     def raise_exception(self):
         raise self.type, self.value, self.tb 
@@ -102,6 +109,8 @@ class Deferred(object):
                         self.add_both(self._continue)
                 except:
                     self.result = Failure()
+            if isinstance(self.result, Failure):
+                print self.result
 
     def add_callback(self, cb):
         self.add_callbacks(cb)

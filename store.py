@@ -59,8 +59,11 @@ class BerkeleyDBStore(Store):
         self._store.sync()
 
     def get_iterator(self):
-        k, v = self._store.first()
-        return k
+        try:
+            k, v = self._store.first()
+            return k
+        except bsddb.error as e:
+            return None
 
     def iterate(self, iterator, threshold):
         if iterator is None:
