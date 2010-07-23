@@ -445,8 +445,7 @@ class VinzClortho(object):
 
     def create_ring(self, join):
         if join:
-            d = self.get_gossip(split_str_addr(join))
-            d.add_callback(self.ring_joined)
+            self.get_gossip(split_str_addr(join))
         else:
             vc = vectorclock.VectorClock()
             vc.increment(self._vcid)
@@ -454,11 +453,9 @@ class VinzClortho(object):
             self.reactor.call_later(self.update_storage, 0.0)
             self.schedule_gossip()
 
-    def ring_joined(self, result):
-        self.schedule_gossip(0.0)
-
     def gossip_received(self, address, response):
         meta = pickle.loads(bz2.decompress(response.data))
+        print "gossip received"
         if self.update_meta(meta):
             print "update gossip", address
             url = "http://%s:%d/_metadata"%address
@@ -515,6 +512,7 @@ class VinzClortho(object):
         return n.host, n.port
 
     def schedule_gossip(self, timeout=None):
+        print "gossip scheduled", timeout
         if timeout is None:
             timeout = self.gossip_interval
         self.reactor.call_later(self.get_gossip, timeout)
