@@ -141,7 +141,7 @@ def resolve_list_extend(list_):
         if not isinstance(b, list):
             b = [b]
         return a + b              
-    return vectorclock.resolve_list(list_, joiner)        
+    return resolve_list(list_, joiner)        
 
 class TestVectorClock(unittest.TestCase):
     def test_empty_equals_empty(self):
