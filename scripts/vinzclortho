@@ -1,0 +1,5 @@
+#!/usr/bin/env python
+
+import vinzclortho.core
+
+vinzclortho.core.main()

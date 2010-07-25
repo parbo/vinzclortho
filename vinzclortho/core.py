@@ -87,7 +87,7 @@ class RemoteStorage(object):
             raise KeyError
 
     def _ok(self, result):
-        if result.code == 200:
+        if result.status == 200:
             return
         else:
             raise KeyError
@@ -580,9 +580,8 @@ def split_str_addr(str_addr):
     except IndexError:
         port = 80
     return host, port
-    
-    
-if __name__ == '__main__':
+
+def main():
     parser = optparse.OptionParser()
     parser.add_option("-a", "--address", dest="address", default="localhost:8080",
                       help="Bind to ADDRESS", metavar="ADDRESS")
@@ -592,6 +591,8 @@ if __name__ == '__main__':
                       help="Number of partitions to claim")
     (options, args) = parser.parse_args()    
 
-    print 'Starting server, use <Ctrl-C> to stop'
     vc = VinzClortho(options.address, options.join, options.claim, True)
     vc.run()
+    
+if __name__ == '__main__':
+    main()
