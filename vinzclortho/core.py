@@ -14,6 +14,8 @@ import tangled.server as ts
 import vectorclock
 import consistenthashing as chash
 
+import logging
+log = logging.getLogger("vinzclortho.core")
 
 class InvalidContext(Exception):
     pass
@@ -194,10 +196,10 @@ class StoreHandler(object):
             for replica, result in self.results:
                 vc, value = result
                 if vc_final.descends_from(vc) and not vc.descends_from(vc_final):
-                    print "read-repair needed for", replica
+                    log.info("Read-repair needed for %s", replica)
                     d = replica.put(self.key, self._encode(vc_final, value_final))
             for replica, result in self.failed:
-                print "read-repair of failed node", replica
+                log.info("Read-repair of failed node %s", replica)
                 d = replica.put(self.key, self._encode(vc_final, value_final))
         return result
 
@@ -301,11 +303,11 @@ class MetaDataHandler(object):
         self.context = context
 
     def do_GET(self, request):
-        print "metadata requested"
+        log.info("Metadata requested by %s", request.client_address)
         return tc.succeed(ts.Response(200, None, bz2.compress(pickle.dumps(self.context._metadata))))
    
     def do_PUT(self, request):
-        print "metadata submitted"
+        log.info("Metadata submitted by %s", request.client_address)
         self.context.update_meta(pickle.loads(bz2.decompress(request.data)))
         return tc.succeed(ts.Response(200, None, None))
 
@@ -355,11 +357,12 @@ class VinzClortho(object):
     N=3
     num_partitions=128
     worker_pool_size=10
-    def __init__(self, addr, join, claim, persistent):
+    def __init__(self, addr, join, claim, partitions, logfile, persistent):
         self.reactor = tc.Reactor()
         self.workers = [tc.Worker(self.reactor, True) for i in range(self.worker_pool_size)]
         self.address = split_str_addr(addr)
         self.host, self.port = self.address
+        self.num_partitions = partitions or self.num_partitions 
         self.persistent = persistent
         self._vcid = self.address
         self._storage = {}        
@@ -451,9 +454,9 @@ class VinzClortho(object):
 
     def gossip_received(self, address, response):
         meta = pickle.loads(bz2.decompress(response.data))
-        print "gossip received"
+        log.info("Gossip received from %s", address)
         if self.update_meta(meta):
-            print "update gossip", address
+            log.info("Update gossip @ %s", address)
             url = "http://%s:%d/_metadata"%address
             d = tangled.client.request(url, command="PUT", data=bz2.compress(pickle.dumps(self._metadata)))
             d.add_both(self.gossip_sent)
@@ -473,14 +476,14 @@ class VinzClortho(object):
             vc_curr, meta_curr = self._metadata
             if vc_new.descends_from(vc_curr):
                 if vc_new != vc_curr:
-                    print "received metadata is new", meta
+                    log.debug("Received metadata is new %s", meta)
                     # Accept new metadata
                     self._metadata = meta
                     updated = True
                 else:
-                    print "received metadata is the same"
+                    log.debug("Received metadata is the same")
             else:
-                print "received metadata is old"
+                log.debug("Received metadata is old")
                 old = True
                 # Reconcile?
 
@@ -495,7 +498,6 @@ class VinzClortho(object):
         if updated:
             # Grab the node since it might have been updated
             self._node = self.ring.get_node(self._node.name)
-            print "Claimed:", len(self._node.claim), self._node.claim
             self.reactor.call_later(self.update_storage, 0.0)            
             self.reactor.call_later(self.check_handoff, 0.0)            
         return old
@@ -508,23 +510,23 @@ class VinzClortho(object):
         return n.host, n.port
 
     def schedule_gossip(self, timeout=None):
-        print "gossip scheduled", timeout
+        log.debug("Gossip scheduled, %s", timeout)
         if timeout is None:
             timeout = self.gossip_interval
         self.reactor.call_later(self.get_gossip, timeout)
 
     def gossip_sent(self, result):
-        print "gossip sent"
+        log.debug("Gossip sent")
         self.schedule_gossip()
 
     def gossip_error(self, result):
-        print "gossip error"
+        log.error("Gossip error: %s", result)
         self.schedule_gossip()
 
     def get_gossip(self, a=None):
         address = a or self.random_other_node_address()
         if address is not None:
-            print "gossip with", address
+            log.debug("Gossip with", address)
             d = tangled.client.request("http://%s:%d/_metadata"%address)
             d.add_callbacks(functools.partial(self.gossip_received, address), self.gossip_error)
             return d
@@ -537,15 +539,15 @@ class VinzClortho(object):
     def _partial_handoff(self, node, partition, kvlist):
         if not kvlist:
             # TODO: remove the db file etc
-            print "Shutdown", partition
+            log.debug("Shutdown partition %s", partition)
             del self._pending_shutdown_storage[partition]
         else:
             url = "http://%s:%d/_handoff"%(node.host, node.port)
             d = tangled.client.request(url, command="PUT", data=bz2.compress(pickle.dumps(kvlist)))
-            print "Handoff", len(kvlist), "items from", partition, "to", node
+            log.info("Handoff %d items from %s to %s", len(kvlist), partition, node)
 
     def do_handoff(self, node, partitions, result):
-        print "Handing off", partitions
+        log.debug("Handing off %s", partitions)
         for p in partitions:
             s = self._storage[p]
             self._pending_shutdown_storage[p] = s
@@ -589,9 +591,13 @@ def main():
                       help="Bind to ADDRESS", metavar="ADDRESS")
     parser.add_option("-c", "--claim", dest="claim",
                       help="Number of partitions to claim")
+    parser.add_option("-p", "--partitions", dest="partitions",
+                      help="Number of partitions in the hash ring")
+    parser.add_option("-l", "--logfile", dest="logfile", metavar="FILE"
+                      help="Use FILE as logfile")
     (options, args) = parser.parse_args()    
 
-    vc = VinzClortho(options.address, options.join, options.claim, True)
+    vc = VinzClortho(options.address, options.join, options.claim, options.partition, options.logfile, True)
     vc.run()
     
 if __name__ == '__main__':

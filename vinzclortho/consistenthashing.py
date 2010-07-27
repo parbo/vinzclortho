@@ -3,6 +3,9 @@ import itertools
 import unittest
 import random
 
+import logging
+log = logging.getLogger("vinzclortho.consistenthashing")
+
 def hashval(s):
     """The hash value is a 160 bit integer"""
     return int(hashlib.sha1(s).hexdigest(), 16)
@@ -127,7 +130,6 @@ class Ring(object):
                         break
 
     def update_claim(self):
-        print "update claim"
         # Check that all nodes have roughly the claim they wanted..
         for n in self.nodes:            
             want = n.wanted or (self.num_partitions // len(self.nodes))
@@ -146,7 +148,7 @@ class Ring(object):
         """This will set the number of claimed partitions to 'claim'
         by stealing/giving partitions at random
         """
-        print "updating node", node, claim, force
+        log.info("Updating node %s %s %s", node, claim, force)
         node.wanted = claim
         claim = claim or (self.num_partitions // len(self.nodes))
         unwanted = self.unwanted(node.claim)
@@ -167,7 +169,6 @@ class Ring(object):
                 unwanted.add(p_)
 
         while claim < len(node.claim):
-            print claim, len(node.claim)
             p_from = random_elem(node.claim)
             available_nodes = set(self.nodes) - set([self.partitions[p] for p in self._neighbours(p_from)])
             try:
@@ -178,7 +179,7 @@ class Ring(object):
                     # hand it to one anyway
                     n = random_elem(list(set(self.nodes) - set([node])))
                 else:
-                    print "could not handover..", claim, len(node.claim)
+                    log.info("Could not handover.. %s %d", claim, len(node.claim))
                     break
             n.claim.append(p_from)
             n.claim.sort()

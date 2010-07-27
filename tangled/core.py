@@ -9,22 +9,29 @@ import time
 import heapq
 import select
 
+import logging
+log = logging.getLogger("tangled.core")
+
 __version__ = "0.1"
 
 def succeed(r):
+    """Syntactic sugar for making a synchronous call look asynchronous"""
     d = Deferred()
     d.callback(r)
     return d
 
 def fail(r):
+    """Syntactic sugar for making a synchronous call look asynchronous, failure version"""
     d = Deferred()
     d.callback(r)
     return d
 
 def passthru(r):
+    """A callback/errback that doesn't do anything"""
     return r
 
 class Worker(threading.Thread):
+    """This is a worker thread which executes a function and calls a callback on completion"""
     def __init__(self, reactor, autostart=False):
         threading.Thread.__init__(self, target=self._runner)
         self._queue = Queue.Queue()
@@ -110,7 +117,7 @@ class Deferred(object):
                 except:
                     self.result = Failure()
             if isinstance(self.result, Failure):
-                print self.result
+                log.error("Unhandled Failure: %s", self.result)
 
     def add_callback(self, cb):
         self.add_callbacks(cb)
@@ -150,7 +157,7 @@ class Deferred(object):
 
 
 def set_reuse_addr(s):
-    # try to re-use a server port if possible
+    """Try to re-use a server port if possible. Useful in development."""
     try:
         s.setsockopt(
             socket.SOL_SOCKET, socket.SO_REUSEADDR,
@@ -160,9 +167,11 @@ def set_reuse_addr(s):
     except socket.error:
         pass
 
+class BindError(Excpetion):
+    pass
 
 class Trigger(asyncore.dispatcher):
-    """Used to trigger the asyncore event loop with external stuff,
+    """Used to trigger the event loop with external stuff,
     also from Medusa"""
 
     def __init__(self):
@@ -184,7 +193,7 @@ class Trigger(asyncore.dispatcher):
                 break
             except:
                 if port <= 19950:
-                    raise 'Bind Error', 'Cannot bind trigger!'
+                    raise BindError
                 port = port - 1
                 
         a.listen(1)
@@ -232,6 +241,7 @@ class Trigger(asyncore.dispatcher):
             self.lock.release()
 
 class Reactor(object):
+    """The reactor is the engine of your asynchronous application."""
     # trigger object to wake the loop
     _trigger = Trigger()
     use_poll = False

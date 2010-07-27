@@ -7,6 +7,9 @@ import re
 import sys
 import uuid
 
+import logging
+log = logging.getLogger("tangled.server")
+
 __version__ = "0.1"
 
 class Request(object):
@@ -92,6 +95,8 @@ class AsyncHTTPRequestHandler(asynchat.async_chat, BaseHTTPRequestHandler):
         for k, v in response.headers.items():
             self.send_header(k, v)
         if not response.data:
+            if "Content-Length" not in response.headers:
+                self.send_header("Content-Length", "0")
             self.end_headers()
         else:
             if isinstance(response.data, list):
@@ -158,7 +163,7 @@ class AsyncHTTPRequestHandler(asynchat.async_chat, BaseHTTPRequestHandler):
             self.handle_request()
 
     def log_message(self, format, *args):
-        pass
+        log.info(format%args)
 
     def request_handled(self, response):
         self.send_response(response.code)
@@ -192,10 +197,10 @@ class AsyncHTTPServer(asyncore.dispatcher):
         try:
             conn, addr = self.accept()
         except socket.error:
-            self.log_info('warning: server accept() threw an exception', 'warning')
+            log.exception('server accept() threw an exception')
             return
         except TypeError:
-            self.log_info('warning: server accept() threw EWOULDBLOCK', 'warning')
+            log.exception('server accept() threw EWOULDBLOCK')
             return
         # creates an instance of the handler class to handle the request/response
         # on the incoming connection

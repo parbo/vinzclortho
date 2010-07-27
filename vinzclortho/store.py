@@ -3,19 +3,36 @@ import bsddb
 import unittest
 
 class Store(object):
+    """Base class for stores."""
+    def put(self, key, value):
+        raise NotImplementedError
+
+    def get(self, key):
+        raise NotImplementedError
+
+    def delete(self, key):
+        raise NotImplementedError
+
+    def get_iterator(self):
+        raise NotImplementedError
+
+    def iterate(self, iterator, threshold):
+        raise NotImplementedError
+
     def multi_put(self, kvlist, resolver):
         for k, v in kvlist:
             try:
                 v_curr = self.get(k)
                 v = resolver(v, v_curr)
             except KeyError:
+                # This store doesn't have the key, no need to resolve
                 pass
             # TODO: probably should check if the value was changed...
-            print "multi put", k, v
             self.put(k, v)
     
 
 class DictStore(Store):
+    """Basic in-memory store."""
     def __init__(self):
         self._store = {}
 
@@ -44,6 +61,7 @@ class DictStore(Store):
             return ret, iterator
 
 class BerkeleyDBStore(Store):
+    """Store using BerkeleyDB, specifically the B-Tree version"""
     def __init__(self, filename):
         self._store = bsddb.btopen(filename)
 
@@ -82,6 +100,7 @@ class BerkeleyDBStore(Store):
         
 
 class SQLiteStore(Store):
+    """Store that uses SQLite for storage."""
     def __init__(self, filename):
         self._db = filename
         self.conn = sqlite3.connect(self._db)

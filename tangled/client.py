@@ -5,6 +5,9 @@ import mimetools
 import cStringIO
 import core
 
+import logging
+log = logging.getLogger("tangled.client")
+
 class Response(object):
     def __init__(self, addr):
         self.data = ""
