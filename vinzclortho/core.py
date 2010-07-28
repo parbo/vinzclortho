@@ -1,3 +1,5 @@
+# -*- coding: utf-8 -*-
+#
 # Copyright (c) 2001-2010 Pär Bohrarper.
 # See LICENSE for details.
 
@@ -637,7 +639,7 @@ def main():
                       help="Number of partitions to claim")
     parser.add_option("-p", "--partitions", dest="partitions",
                       help="Number of partitions in the hash ring")
-    parser.add_option("-l", "--logfile", dest="logfile", metavar="FILE"
+    parser.add_option("-l", "--logfile", dest="logfile", metavar="FILE",
                       help="Use FILE as logfile")
     (options, args) = parser.parse_args()
 

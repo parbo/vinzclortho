@@ -1,3 +1,5 @@
+# -*- coding: utf-8 -*-
+#
 # Copyright (c) 2001-2010 Pär Bohrarper.
 # See LICENSE for details.
 
@@ -109,8 +111,6 @@ class Failure(object):
     def check(self, *exceptions):
         """
         This can be used to have try/except like blocks in your errback
-        if result.check(MyException, ValueError):
-            do_something()
         """
         for e in exceptions:
             if isinstance(self.type, e):

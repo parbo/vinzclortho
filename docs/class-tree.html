@@ -1,0 +1,292 @@
+<?xml version="1.0" encoding="ascii"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+          "DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+  <title>Class Hierarchy</title>
+  <link rel="stylesheet" href="epydoc.css" type="text/css" />
+  <script type="text/javascript" src="epydoc.js"></script>
+</head>
+
+<body bgcolor="white" text="black" link="blue" vlink="#204080"
+      alink="#204080">
+<!-- ==================== NAVIGATION BAR ==================== -->
+<table class="navbar" border="0" width="100%" cellpadding="0"
+       bgcolor="#a0c0ff" cellspacing="0">
+  <tr valign="middle">
+
+  <!-- Tree link -->
+      <th bgcolor="#70b0f0" class="navbar-select"
+          >&nbsp;&nbsp;&nbsp;Trees&nbsp;&nbsp;&nbsp;</th>
+
+  <!-- Index link -->
+      <th>&nbsp;&nbsp;&nbsp;<a
+        href="identifier-index.html">Indices</a>&nbsp;&nbsp;&nbsp;</th>
+
+  <!-- Help link -->
+      <th>&nbsp;&nbsp;&nbsp;<a
+        href="help.html">Help</a>&nbsp;&nbsp;&nbsp;</th>
+
+  <!-- Project homepage -->
+      <th class="navbar" align="right" width="100%">
+        <table border="0" cellpadding="0" cellspacing="0">
+          <tr><th class="navbar" align="center"
+            ><a class="navbar" target="_top" href="http://bitbucket.org/rogueops/vinzclortho">Vinz Clortho</a></th>
+          </tr></table></th>
+  </tr>
+</table>
+<table width="100%" cellpadding="0" cellspacing="0">
+  <tr valign="top">
+    <td width="100%">&nbsp;</td>
+    <td>
+      <table cellpadding="0" cellspacing="0">
+        <!-- hide/show private -->
+        <tr><td align="right"><span class="options">[<a href="javascript:void(0);" class="privatelink"
+    onclick="toggle_private();">hide&nbsp;private</a>]</span></td></tr>
+        <tr><td align="right"><span class="options"
+            >[<a href="frames.html" target="_top">frames</a
+            >]&nbsp;|&nbsp;<a href="class-tree.html"
+            target="_top">no&nbsp;frames</a>]</span></td></tr>
+      </table>
+    </td>
+  </tr>
+</table>
+<center><b>
+ [ <a href="module-tree.html">Module Hierarchy</a>
+ | <a href="class-tree.html">Class Hierarchy</a> ]
+</b></center><br />
+<h1 class="epydoc">Class Hierarchy</h1>
+<ul class="nomargin-top">
+    <li> <strong class="uidlink">SocketServer.BaseRequestHandler</strong>:
+      <em class="summary">Base class for request handler classes.</em>
+    <ul>
+    <li> <strong class="uidlink">SocketServer.StreamRequestHandler</strong>:
+      <em class="summary">Define self.rfile and self.wfile for stream sockets.</em>
+    <ul>
+    <li> <strong class="uidlink">BaseHTTPServer.BaseHTTPRequestHandler</strong>:
+      <em class="summary">HTTP request handler base class.</em>
+    <ul>
+    <li> <strong class="uidlink"><a href="tangled.server.AsyncHTTPRequestHandler-class.html">tangled.server.AsyncHTTPRequestHandler</a></strong>:
+      <em class="summary">An asynchronous HTTP request handler inspired somewhat by the 
+        http://code.activestate.com/recipes/440665-asynchronous-http-server/
+        recipe.</em>
+    </li>
+    </ul>
+    </li>
+    </ul>
+    </li>
+    </ul>
+    </li>
+    <li> <strong class="uidlink">rfc822.Message</strong>:
+      <em class="summary">Represents a single RFC 2822-compliant message.</em>
+    <ul>
+    <li> <strong class="uidlink"><a href="mimetools.Message-class.html">mimetools.Message</a></strong>:
+      <em class="summary">A derived class of rfc822.Message that knows about MIME headers and
+        contains some hooks for decoding encoded and multipart messages.</em>
+    </li>
+    </ul>
+    </li>
+    <li> <strong class="uidlink">asyncore.dispatcher</strong>
+    <ul>
+    <li> <strong class="uidlink"><a href="tangled.server.AsyncHTTPServer-class.html">tangled.server.AsyncHTTPServer</a></strong>:
+      <em class="summary">Cobbled together from various sources, most of them state that they
+        copied from the Medusa http server..</em>
+    </li>
+    <li> <strong class="uidlink"><a href="tangled.core.Trigger-class.html">tangled.core.Trigger</a></strong>:
+      <em class="summary">Used to trigger the event loop with external stuff, also from 
+        Medusa</em>
+    </li>
+    <li> <strong class="uidlink">asynchat.async_chat</strong>:
+      <em class="summary">This is an abstract class.</em>
+    <ul>
+    <li> <strong class="uidlink"><a href="tangled.server.AsyncHTTPRequestHandler-class.html">tangled.server.AsyncHTTPRequestHandler</a></strong>:
+      <em class="summary">An asynchronous HTTP request handler inspired somewhat by the 
+        http://code.activestate.com/recipes/440665-asynchronous-http-server/
+        recipe.</em>
+    </li>
+    </ul>
+    </li>
+    <li> <strong class="uidlink">asyncore.dispatcher_with_send</strong>
+    <ul>
+    <li> <strong class="uidlink"><a href="tangled.client.AsyncHTTPClient-class.html">tangled.client.AsyncHTTPClient</a></strong>:
+      <em class="summary">Asynchronous HTTP client, based on 
+        http://effbot.org/librarybook/SimpleAsyncHTTP.py</em>
+    </li>
+    </ul>
+    </li>
+    </ul>
+    </li>
+    <li> <strong class="uidlink">object</strong>:
+      <em class="summary">The most base type</em>
+    <ul>
+    <li> <strong class="uidlink"><a href="vinzclortho.core.AdminHandler-class.html">vinzclortho.core.AdminHandler</a></strong>:
+      <em class="summary">The request handler for requests to /admin.</em>
+    </li>
+    <li> <strong class="uidlink">exceptions.BaseException</strong>:
+      <em class="summary">Common base class for all exceptions</em>
+    <ul>
+    <li> <strong class="uidlink">exceptions.Exception</strong>:
+      <em class="summary">Common base class for all non-exit exceptions.</em>
+    <ul>
+    <li> <strong class="uidlink"><a href="tangled.core.BindError-class.html">tangled.core.BindError</a></strong>
+    </li>
+    <li> <strong class="uidlink"><a href="vinzclortho.core.InvalidContext-class.html">vinzclortho.core.InvalidContext</a></strong>
+    </li>
+    <li> <strong class="uidlink">exceptions.StandardError</strong>:
+      <em class="summary">Base class for all standard Python exceptions that do not represent
+        interpreter exiting.</em>
+    <ul>
+    <li> <strong class="uidlink"><a href="exceptions.AssertionError-class.html">exceptions.AssertionError</a></strong>:
+      <em class="summary">Assertion failed.</em>
+    </li>
+    </ul>
+    </li>
+    </ul>
+    </li>
+    </ul>
+    </li>
+    <li> <strong class="uidlink"><a href="tangled.core.Deferred-class.html">tangled.core.Deferred</a></strong>:
+      <em class="summary">Very similar to Twisted's Deferred object, but with less features</em>
+    </li>
+    <li> <strong class="uidlink"><a href="tangled.core.Failure-class.html">tangled.core.Failure</a></strong>:
+      <em class="summary">Like Twisted's Failure object, but with no features</em>
+    </li>
+    <li> <strong class="uidlink"><a href="vinzclortho.core.HandoffHandler-class.html">vinzclortho.core.HandoffHandler</a></strong>:
+      <em class="summary">The request handler for requests to /_handoff.</em>
+    </li>
+    <li> <strong class="uidlink"><a href="vinzclortho.core.LocalStorage-class.html">vinzclortho.core.LocalStorage</a></strong>:
+      <em class="summary">A wrapper that makes calls to a <a 
+        href="vinzclortho.store.Store-class.html" 
+        class="link">store.Store</a> be executed by a worker, and return <a
+        href="tangled.core.Deferred-class.html" 
+        class="link">tangled.core.Deferred</a>'s</em>
+    </li>
+    <li> <strong class="uidlink"><a href="vinzclortho.core.LocalStoreHandler-class.html">vinzclortho.core.LocalStoreHandler</a></strong>:
+      <em class="summary">The request handler for requests to /_localstore/somekey</em>
+    </li>
+    <li> <strong class="uidlink"><a href="vinzclortho.core.MetaDataHandler-class.html">vinzclortho.core.MetaDataHandler</a></strong>:
+      <em class="summary">The request handler for requests to /_metadata.</em>
+    </li>
+    <li> <strong class="uidlink"><a href="vinzclortho.consistenthashing.Node-class.html">vinzclortho.consistenthashing.Node</a></strong>
+    </li>
+    <li> <strong class="uidlink"><a href="tangled.server.AsyncHTTPRequestHandler.Pusher-class.html">tangled.server.AsyncHTTPRequestHandler.Pusher</a></strong>
+    </li>
+    <li> <strong class="uidlink"><a href="tangled.core.Reactor-class.html">tangled.core.Reactor</a></strong>:
+      <em class="summary">The reactor is the engine of your asynchronous application.</em>
+    </li>
+    <li> <strong class="uidlink"><a href="vinzclortho.core.RemoteStorage-class.html">vinzclortho.core.RemoteStorage</a></strong>:
+      <em class="summary">A wrapper object that makes remote stores accessible just like 
+        local ones</em>
+    </li>
+    <li> <strong class="uidlink"><a href="tangled.server.Request-class.html">tangled.server.Request</a></strong>:
+      <em class="summary">The request object that gets passed to a handler in order to 
+        respond to a request.</em>
+    </li>
+    <li> <strong class="uidlink"><a href="tangled.server.Response-class.html">tangled.server.Response</a></strong>:
+      <em class="summary">The response object returned by a request handler.</em>
+    </li>
+    <li> <strong class="uidlink"><a href="tangled.client.Response-class.html">tangled.client.Response</a></strong>:
+      <em class="summary">This is the response object returned by <a 
+        href="tangled.client.AsyncHTTPClient-class.html" 
+        class="link">AsyncHTTPClient</a>.</em>
+    </li>
+    <li> <strong class="uidlink"><a href="vinzclortho.consistenthashing.Ring-class.html">vinzclortho.consistenthashing.Ring</a></strong>
+    </li>
+    <li> <strong class="uidlink"><a href="vinzclortho.store.Store-class.html">vinzclortho.store.Store</a></strong>:
+      <em class="summary">Base class for stores.</em>
+    <ul>
+    <li> <strong class="uidlink"><a href="vinzclortho.store.BerkeleyDBStore-class.html">vinzclortho.store.BerkeleyDBStore</a></strong>:
+      <em class="summary">Store using BerkeleyDB, specifically the B-Tree version</em>
+    </li>
+    <li> <strong class="uidlink"><a href="vinzclortho.store.DictStore-class.html">vinzclortho.store.DictStore</a></strong>:
+      <em class="summary">Basic in-memory store.</em>
+    </li>
+    <li> <strong class="uidlink"><a href="vinzclortho.store.SQLiteStore-class.html">vinzclortho.store.SQLiteStore</a></strong>:
+      <em class="summary">Store that uses SQLite for storage.</em>
+    </li>
+    </ul>
+    </li>
+    <li> <strong class="uidlink"><a href="vinzclortho.core.StoreHandler-class.html">vinzclortho.core.StoreHandler</a></strong>:
+      <em class="summary">The request handler for requests to /store/somekey.</em>
+    </li>
+    <li> <strong class="uidlink">unittest.TestCase</strong>:
+      <em class="summary">A class whose instances are single test cases.</em>
+    <ul>
+    <li> <strong class="uidlink"><a href="vinzclortho.consistenthashing.TestConsistentHashing-class.html">vinzclortho.consistenthashing.TestConsistentHashing</a></strong>
+    </li>
+    <li> <strong class="uidlink"><a href="vinzclortho.store.TestStores-class.html">vinzclortho.store.TestStores</a></strong>
+    </li>
+    <li> <strong class="uidlink"><a href="vinzclortho.vectorclock.TestVectorClock-class.html">vinzclortho.vectorclock.TestVectorClock</a></strong>
+    </li>
+    </ul>
+    </li>
+    <li> <strong class="uidlink"><a href="vinzclortho.vectorclock.VectorClock-class.html">vinzclortho.vectorclock.VectorClock</a></strong>:
+      <em class="summary">A vector clock implementation.</em>
+    </li>
+    <li> <strong class="uidlink"><a href="vinzclortho.core.VinzClortho-class.html">vinzclortho.core.VinzClortho</a></strong>:
+      <em class="summary">The main object that contains the HTTP server and handles gossiping
+        of the consistent hash ring metadata.</em>
+    </li>
+    <li> <strong class="uidlink">threading._Verbose</strong>
+    <ul>
+    <li> <strong class="uidlink">threading.Thread</strong>
+    <ul>
+    <li> <strong class="uidlink"><a href="tangled.core.Worker-class.html">tangled.core.Worker</a></strong>:
+      <em class="summary">This is a worker thread which executes a function and calls a 
+        callback on completion</em>
+    </li>
+    </ul>
+    </li>
+    </ul>
+    </li>
+    </ul>
+    </li>
+</ul>
+<!-- ==================== NAVIGATION BAR ==================== -->
+<table class="navbar" border="0" width="100%" cellpadding="0"
+       bgcolor="#a0c0ff" cellspacing="0">
+  <tr valign="middle">
+
+  <!-- Tree link -->
+      <th bgcolor="#70b0f0" class="navbar-select"
+          >&nbsp;&nbsp;&nbsp;Trees&nbsp;&nbsp;&nbsp;</th>
+
+  <!-- Index link -->
+      <th>&nbsp;&nbsp;&nbsp;<a
+        href="identifier-index.html">Indices</a>&nbsp;&nbsp;&nbsp;</th>
+
+  <!-- Help link -->
+      <th>&nbsp;&nbsp;&nbsp;<a
+        href="help.html">Help</a>&nbsp;&nbsp;&nbsp;</th>
+
+  <!-- Project homepage -->
+      <th class="navbar" align="right" width="100%">
+        <table border="0" cellpadding="0" cellspacing="0">
+          <tr><th class="navbar" align="center"
+            ><a class="navbar" target="_top" href="http://bitbucket.org/rogueops/vinzclortho">Vinz Clortho</a></th>
+          </tr></table></th>
+  </tr>
+</table>
+<table border="0" cellpadding="0" cellspacing="0" width="100%%">
+  <tr>
+    <td align="left" class="footer">
+    Generated by Epydoc 3.0.1 on Wed Jul 28 13:02:35 2010
+    </td>
+    <td align="right" class="footer">
+      <a target="mainFrame" href="http://epydoc.sourceforge.net"
+        >http://epydoc.sourceforge.net</a>
+    </td>
+  </tr>
+</table>
+
+<script type="text/javascript">
+  <!--
+  // Private objects are initially displayed (because if
+  // javascript is turned off then we want them to be
+  // visible); but by default, we want to hide them.  So hide
+  // them unless we have a cookie that says to show them.
+  checkCookie();
+  // -->
+</script>
+</body>
+</html>

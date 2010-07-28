@@ -1,3 +1,5 @@
+# -*- coding: utf-8 -*-
+#
 # Copyright (c) 2001-2010 Pär Bohrarper.
 # See LICENSE for details.
 
@@ -20,11 +22,11 @@ class Request(object):
     The request object that gets passed to a handler in order to respond
     to a request.
 
-    @var client_address: tuple of address, port
-    @var method: "GET", "PUT", etc.
-    @var path: The uri of the request, /foo/bar
-    @var data: The body of the request
-    @var groups: This contains the groups (if any) from the regex used when registering the request handler
+    @ivar client_address: tuple of address, port
+    @ivar method: "GET", "PUT", etc.
+    @ivar path: The uri of the request, /foo/bar
+    @ivar data: The body of the request
+    @ivar groups: This contains the groups (if any) from the regex used when registering the request handler
     """
     def __init__(self, client_address, method, path, headers, data, groups):
         self.client_address = client_address
