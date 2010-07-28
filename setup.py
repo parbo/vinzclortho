@@ -9,6 +9,7 @@ setup(name='VinzClortho',
       author='Pär Bohrarper',
       author_email='par.bohrarper@gmail.com',
       url='http://bitbucket.org/rogueops/vinzclortho',
+      license="MIT",
       packages=['vinzclortho', 'tangled'],
       scripts=['scripts/vinzclortho'],
       )

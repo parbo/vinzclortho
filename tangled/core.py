@@ -1,3 +1,6 @@
+# Copyright (c) 2001-2010 Pär Bohrarper.
+# See LICENSE for details.
+
 import asynchat
 import asyncore
 import socket
@@ -31,7 +34,13 @@ def passthru(r):
     return r
 
 class Worker(threading.Thread):
-    """This is a worker thread which executes a function and calls a callback on completion"""
+    """
+    This is a worker thread which executes a function and calls a callback on completion
+
+    @param reactor: The reactor this is a worker for.
+    @type reactor: L{Reactor}
+    @param autostart: If true, the worker thread starts immediately. Otherwise start() has to be called.
+    """
     def __init__(self, reactor, autostart=False):
         threading.Thread.__init__(self, target=self._runner)
         self._queue = Queue.Queue()
@@ -42,9 +51,11 @@ class Worker(threading.Thread):
             self.start()
 
     def stop(self):
+        """Stops the worker"""
         self._running = False
 
     def _runner(self):
+        """The message pump of the worker"""
         while self._running:
             try:
                 func, oncomplete = self._queue.get(block=True, timeout=1)
@@ -59,9 +70,23 @@ class Worker(threading.Thread):
                 oncomplete(res)
 
     def execute(self, func, oncomplete):
+        """
+        Executes func in the worker thread, which then calls oncomplete
+
+        @type func: callable
+        @type oncomplete: callable
+        """
         self._queue.put((func, oncomplete))
 
     def defer(self, func):
+        """
+        Defers the call to func to this worker
+
+        @param func: The function you want the worker to call
+        @type func: callable
+        @return: A L{Deferred} object that will eventually get the result of func
+        @rtype: L{Deferred}
+        """
         return self.reactor.defer_to_worker(func, self)
 
 class Failure(object):
@@ -78,9 +103,15 @@ class Failure(object):
         return "%s %s %s"%(self.type, self.value, self.tb)
 
     def raise_exception(self):
-        raise self.type, self.value, self.tb 
+        """Re-raises the exception"""
+        raise self.type, self.value, self.tb
 
     def check(self, *exceptions):
+        """
+        This can be used to have try/except like blocks in your errback
+        if result.check(MyException, ValueError):
+            do_something()
+        """
         for e in exceptions:
             if isinstance(self.type, e):
                 return True
@@ -111,7 +142,7 @@ class Deferred(object):
                     if isinstance(self.result, Deferred):
                         self.pause()
                         # This will cause the callback chain to resume later,
-                        # or immediately (recursively) if result is already 
+                        # or immediately (recursively) if result is already
                         # available
                         self.add_both(self._continue)
                 except:
@@ -120,19 +151,36 @@ class Deferred(object):
                 log.error("Unhandled Failure: %s", self.result)
 
     def add_callback(self, cb):
+        """See L{add_callbacks}"""
         self.add_callbacks(cb)
-            
+
     def add_errback(self, eb):
+        """
+        Adds errback only (a passthru will be used for the callback, so the result is not lost)
+
+        @param eb: errback
+        """
         self.add_callbacks(passthru, eb)
 
     def add_both(self, cb):
+        """
+        Adds one function as both callback and errback
+
+        @param cb: callback and errback
+        """
         self.add_callbacks(cb, cb)
 
     def add_callbacks(self, cb, eb=None):
+        """
+        Adds callback and errback
+
+        @param cb: callback
+        @param eb: errback
+        """
         self.callbacks.append((cb, eb or passthru))
         if self.called:
             self._run_callbacks()
-            
+
     def pause(self):
         self.paused = self.paused + 1
 
@@ -153,7 +201,7 @@ class Deferred(object):
     def errback(self, fail=None):
         if not isinstance(fail, Failure):
             fail = Failure(fail)
-        self._start_callbacks(fail)        
+        self._start_callbacks(fail)
 
 
 def set_reuse_addr(s):
@@ -167,7 +215,7 @@ def set_reuse_addr(s):
     except socket.error:
         pass
 
-class BindError(Excpetion):
+class BindError(Exception):
     pass
 
 class Trigger(asyncore.dispatcher):
@@ -179,10 +227,10 @@ class Trigger(asyncore.dispatcher):
         w = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         set_reuse_addr(a)
         set_reuse_addr(w)
-        
+
         # set TCP_NODELAY to true to avoid buffering
         w.setsockopt(socket.IPPROTO_TCP, 1, 1)
-        
+
         # tricky: get a pair of connected sockets
         host='127.0.0.1'
         port=19999
@@ -195,7 +243,7 @@ class Trigger(asyncore.dispatcher):
                 if port <= 19950:
                     raise BindError
                 port = port - 1
-                
+
         a.listen(1)
         w.setblocking(0)
         try:
@@ -209,9 +257,9 @@ class Trigger(asyncore.dispatcher):
 
         self.lock = threading.Lock()
         self.funcs = []
-        
+
         asyncore.dispatcher.__init__(self, r)
-        
+
     def readable(self):
         return 1
 
@@ -245,17 +293,32 @@ class Reactor(object):
     # trigger object to wake the loop
     _trigger = Trigger()
     use_poll = False
-    
+
     def __init__(self):
         self._pending_calls = []
 
     def wake(self):
+        """Uses the trigger to wake the async loop"""
         self._trigger.pull_trigger()
 
     def run_in_main(self, func):
+        """
+        Wakes the async loop, and calls func in it
+
+        @param func: The function to call from the main loop
+        """     
         self._trigger.pull_trigger(func)
 
     def defer_to_worker(self, func, worker):
+        """
+        Calls a function in a worker, and return the result as a L{Deferred}
+
+        @param func: The function to call in the worker
+        @param worker: The worker that should handle the call
+        @type worker: L{Worker}
+        @return: A L{Deferred} objeft that will eventually contain the result
+        @rtype: L{Deferred}
+        """
         d = Deferred()
         def callback(result):
             if isinstance(result, Failure):
@@ -266,10 +329,16 @@ class Reactor(object):
         return d
 
     def call_later(self, func, timeout):
+        """
+        Call a function at a later time in the main loop
+   
+        @param func: The function to call
+        @param timeout: How long (in seconds) to the call shall be made
+        """
         heapq.heappush(self._pending_calls, (time.time() + timeout, func))
         self.wake()
 
-    def timeout(self):
+    def _timeout(self):
         if not self._pending_calls:
             return None
         return max(0, self._pending_calls[0][0] - time.time())
@@ -281,7 +350,7 @@ class Reactor(object):
             poll_fun = asyncore.poll
 
         while asyncore.socket_map:
-            timeout = self.timeout()
+            timeout = self._timeout()
             poll_fun(timeout, asyncore.socket_map)
             # check expired timeouts
             t = time.time()

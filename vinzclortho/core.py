@@ -1,3 +1,6 @@
+# Copyright (c) 2001-2010 Pär Bohrarper.
+# See LICENSE for details.
+
 import functools
 import cPickle as pickle
 import base64
@@ -22,6 +25,9 @@ class InvalidContext(Exception):
 
 
 class LocalStorage(object):
+    """
+    A wrapper that makes calls to a L{store.Store} be executed by a worker, and return L{tangled.core.Deferred}'s
+    """
     def __init__(self, worker, name, partition, persistent):
         self.worker = worker
         self.name = name
@@ -39,10 +45,10 @@ class LocalStorage(object):
 
     def put(self, key, value):
         return self.worker.defer(functools.partial(self._store.put, key, value))
-    
+
     def multi_put(self, kvlist, resolver):
         return self.worker.defer(functools.partial(self._store.multi_put, kvlist, resolver))
-    
+
     def delete(self, key):
         return self.worker.defer(functools.partial(self._store.delete, key))
 
@@ -64,18 +70,19 @@ class LocalStorage(object):
         d.add_callbacks(functools.partial(self._iterate_result, True, threshold, callback), self._iterate_error)
 
     def get_all(self, threshold, callback):
-        """This will call callback multiple times with a list of key/val tuples. 
-        The callback will be called whenever threshold bytes is accumulated 
+        """This will call callback multiple times with a list of key/val tuples.
+        The callback will be called whenever threshold bytes is accumulated
         (and also when all key/val tuples have been gathered). If the storage
         is empty, the callback will be called with an empty list.
-         
-        This does *not* return a Deferred! 
+
+        This does *not* return a Deferred!
         """
         d = self.worker.defer(self._store.get_iterator)
-        d.add_callbacks(functools.partial(self._iterator_ready, threshold, callback), self._iterate_error)        
+        d.add_callbacks(functools.partial(self._iterator_ready, threshold, callback), self._iterate_error)
 
 
 class RemoteStorage(object):
+    """A wrapper object that makes remote stores accessible just like local ones"""
     def __init__(self, address):
         self.address = address
 
@@ -93,20 +100,20 @@ class RemoteStorage(object):
             return
         else:
             raise KeyError
-        
+
 
     def get(self, key):
         host, port = self.address
         d = tangled.client.request("http://%s:%d/_localstore/%s"%(host, port, key))
         d.add_callback(self._ok_get)
         return d
-            
+
     def put(self, key, value):
         host, port = self.address
         d = tangled.client.request("http://%s:%d/_localstore/%s"%(host, port, key), "PUT", value)
         d.add_callback(self._ok)
-        return d        
-            
+        return d
+
     def delete(self, key):
         host, port = self.address
         d = tangled.client.request("http://%s:%d/_localstore/%s"%(host, port, key), "DELETE")
@@ -115,6 +122,7 @@ class RemoteStorage(object):
 
 
 class LocalStoreHandler(object):
+    """The request handler for requests to /_localstore/somekey"""
     def __init__(self, context):
         self.parent = context
 
@@ -132,13 +140,13 @@ class LocalStoreHandler(object):
         d = self.parent.local_get(key)
         d.add_callbacks(self._ok_get, self._error)
         return d
-            
+
     def do_PUT(self, request):
         key = request.groups[0]
         d = self.parent.local_put(key, request.data)
         d.add_callbacks(self._ok, self._error)
         return d
-            
+
     def do_DELETE(self, request):
         key = request.groups[0]
         d = self.parent.local_delete(key)
@@ -149,6 +157,10 @@ class LocalStoreHandler(object):
 
 
 class StoreHandler(object):
+    """
+    The request handler for requests to /store/somekey. Implements the state 
+    machines for quorum reads and writes. It also handles read-repair.
+    """
     W = 2
     R = 2
     def __init__(self, context):
@@ -187,7 +199,7 @@ class StoreHandler(object):
         return request.groups[0], vc, client
 
     def _resolve(self):
-        return vectorclock.resolve_list_extend([result for replica, result in self.results])        
+        return vectorclock.resolve_list_extend([result for replica, result in self.results])
 
     def _read_repair(self, result):
         if len(self.results) + len(self.failed) == len(self.replicas):
@@ -215,7 +227,6 @@ class StoreHandler(object):
     def _respond_error(self):
         if self.response.called:
             return
-        # TODO: find suitable error code
         self.response.callback(ts.Response(404))
 
     def _respond_ok(self):
@@ -223,7 +234,7 @@ class StoreHandler(object):
 
     def _respond_get_ok(self):
         if self.response.called:
-            return        
+            return
         resolved = vectorclock.resolve_list([result for replica, result in self.results])
         vc, value = resolved
         context = self._vc_to_context(vc)
@@ -240,7 +251,7 @@ class StoreHandler(object):
         # There was an actual value, handle it
         self.results.append((replica, result))
         if self._read_quorum_acheived():
-            self._respond_get_ok()    
+            self._respond_get_ok()
         elif self._all_received():
             self._respond_error()
         return result
@@ -257,11 +268,11 @@ class StoreHandler(object):
         self.replicas = self.parent.get_replicas(self.key)
         for r in self.replicas:
             d = r.get(self.key)
-            d.add_callbacks(functools.partial(self._get_ok, r), 
+            d.add_callbacks(functools.partial(self._get_ok, r),
                             functools.partial(self._fail, r))
             d.add_both(self._read_repair)
         return self.response
-            
+
     def _ok(self, replica, result):
         self.results.append((replica, result))
         if self._write_quorum_acheived():
@@ -278,10 +289,10 @@ class StoreHandler(object):
         value = self._encode(vc, request.data)
         for r in self.replicas:
             d = r.put(key, value)
-            d.add_callbacks(functools.partial(self._ok, r), 
+            d.add_callbacks(functools.partial(self._ok, r),
                             functools.partial(self._fail, r))
         return self.response
-            
+
     def do_DELETE(self, request):
         self.response = tc.Deferred()
         key, vc, client = self._extract(request)
@@ -292,26 +303,31 @@ class StoreHandler(object):
         for r in self.replicas:
             # delete is handled as a put of None
             d = r.put(key, value)
-            d.add_callbacks(functools.partial(self._ok, r), 
+            d.add_callbacks(functools.partial(self._ok, r),
                             functools.partial(self._fail, r))
         return self.response
 
     do_PUSH = do_PUT
 
 class MetaDataHandler(object):
+    """The request handler for requests to /_metadata. Used when gossiping."""
     def __init__(self, context):
         self.context = context
 
     def do_GET(self, request):
         log.info("Metadata requested by %s", request.client_address)
         return tc.succeed(ts.Response(200, None, bz2.compress(pickle.dumps(self.context._metadata))))
-   
+
     def do_PUT(self, request):
         log.info("Metadata submitted by %s", request.client_address)
         self.context.update_meta(pickle.loads(bz2.decompress(request.data)))
         return tc.succeed(ts.Response(200, None, None))
 
 class HandoffHandler(object):
+    """
+    The request handler for requests to /_handoff. This is used to send 
+    a partition to its new owner.
+    """
     def __init__(self, context):
         self.context = context
 
@@ -321,12 +337,16 @@ class HandoffHandler(object):
     def do_PUT(self, request):
         kvlist = pickle.loads(bz2.decompress(request.data))
         if not kvlist:
-            return tc.succeed(ts.Response(200, None, None))        
+            return tc.succeed(ts.Response(200, None, None))
         d = self.context.local_multi_put(kvlist)
         d.add_both(self._put_complete)
         return d
 
 class AdminHandler(object):
+    """
+    The request handler for requests to /admin. Currently, only /admin/claim is available.
+    The number of partitions claimed by a node can be read/written using this.
+    """
     def __init__(self, context):
         self.context = context
 
@@ -337,7 +357,7 @@ class AdminHandler(object):
         return tc.succeed(ts.Response(404))
 
     def do_PUT(self, request):
-        service = request.groups[0]        
+        service = request.groups[0]
         if service == "claim":
             try:
                 claim = int(request.data)
@@ -353,23 +373,43 @@ class AdminHandler(object):
     do_PUSH = do_PUT
 
 class VinzClortho(object):
+    """
+    The main object that contains the HTTP server and handles gossiping
+    of the consistent hash ring metadata.
+    """
     gossip_interval=30.0
     N=3
-    num_partitions=128
+    num_partitions=1024
     worker_pool_size=10
     def __init__(self, addr, join, claim, partitions, logfile, persistent):
+        # Setup logging
+        logfile = logfile or "vc_log_" + addr + ".log"
+        logging.basicConfig(level=logging.DEBUG,
+                            format='%(asctime)s %(name)-12s %(levelname)-8s %(message)s',
+                            datefmt='%m-%d %H:%M',
+                            filename=logfile,
+                            filemode='a')
+        # define a Handler which writes WARNING messages or higher to the sys.stderr
+        console = logging.StreamHandler()
+        console.setLevel(logging.WARNING)
+        formatter = logging.Formatter('%(name)-12s: %(levelname)-8s %(message)s')
+        console.setFormatter(formatter)
+        logging.getLogger('').addHandler(console)
+
+        log.info("Starting VinzClortho")
+
         self.reactor = tc.Reactor()
         self.workers = [tc.Worker(self.reactor, True) for i in range(self.worker_pool_size)]
         self.address = split_str_addr(addr)
         self.host, self.port = self.address
-        self.num_partitions = partitions or self.num_partitions 
+        self.num_partitions = partitions or self.num_partitions
         self.persistent = persistent
         self._vcid = self.address
-        self._storage = {}        
+        self._storage = {}
         self._pending_shutdown_storage = {}
-        self._metadata = None        
+        self._metadata = None
         self._node = chash.Node(self.host, self.port)
-        self._claim = claim                          
+        self._claim = claim
         self.create_ring(join)
         self._server = ts.AsyncHTTPServer(self.address, self,
                                           [(r"/store/(.*)", StoreHandler),
@@ -384,6 +424,8 @@ class VinzClortho(object):
         return self._metadata[1]["ring"]
 
     def _get_worker(self, num):
+        # The idea is to get the same worker for a partition, to avoid 
+        # threading issues
         return self.workers[num % len(self.workers)]
 
     def _get_replica(self, node, key):
@@ -407,9 +449,9 @@ class VinzClortho(object):
     def balance(self):
         self.ring.update_claim()
         self._metadata[0].increment(self._vcid)
-        self.reactor.call_later(self.update_storage, 0.0)            
-        self.reactor.call_later(self.check_handoff, 0.0)            
-        self.schedule_gossip(0.0)       
+        self.reactor.call_later(self.update_storage, 0.0)
+        self.reactor.call_later(self.check_handoff, 0.0)
+        self.schedule_gossip(0.0)
 
     def update_claim(self, claim):
         force = (claim == 0)
@@ -465,7 +507,7 @@ class VinzClortho(object):
 
     def update_meta(self, meta):
         old = False
-        updated = False 
+        updated = False
 
         # Update metadata as needed
         if self._metadata is None:
@@ -498,10 +540,10 @@ class VinzClortho(object):
         if updated:
             # Grab the node since it might have been updated
             self._node = self.ring.get_node(self._node.name)
-            self.reactor.call_later(self.update_storage, 0.0)            
-            self.reactor.call_later(self.check_handoff, 0.0)            
+            self.reactor.call_later(self.update_storage, 0.0)
+            self.reactor.call_later(self.check_handoff, 0.0)
         return old
-        
+
     def random_other_node_address(self):
         other = [n for n in self.ring.nodes if n != self._node]
         if len(other) == 0:
@@ -532,6 +574,7 @@ class VinzClortho(object):
             return d
 
     def update_storage(self):
+        """Creates storages (if necessary) for all claimed partitions"""
         for p in self._node.claim:
             if p not in self._storage:
                 self._storage[p] = LocalStorage(self._get_worker(p), "%d@%s:%d"%(p, self.host, self.port), p, self.persistent)
@@ -552,6 +595,7 @@ class VinzClortho(object):
             s = self._storage[p]
             self._pending_shutdown_storage[p] = s
             del self._storage[p]
+            # Send the partitions in 1MB chunks
             s.get_all(1048576, functools.partial(self._partial_handoff, node, p))
         return result
 
@@ -572,7 +616,7 @@ class VinzClortho(object):
 
     def run(self):
         self.reactor.loop()
-    
+
 
 def split_str_addr(str_addr):
     addr = str_addr.split(":")
@@ -595,10 +639,10 @@ def main():
                       help="Number of partitions in the hash ring")
     parser.add_option("-l", "--logfile", dest="logfile", metavar="FILE"
                       help="Use FILE as logfile")
-    (options, args) = parser.parse_args()    
+    (options, args) = parser.parse_args()
 
     vc = VinzClortho(options.address, options.join, options.claim, options.partition, options.logfile, True)
     vc.run()
-    
+
 if __name__ == '__main__':
     main()

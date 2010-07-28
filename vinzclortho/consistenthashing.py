@@ -1,3 +1,6 @@
+# Copyright (c) 2001-2010 Pär Bohrarper.
+# See LICENSE for details.
+
 import hashlib
 import itertools
 import unittest
@@ -32,7 +35,7 @@ class Node(object):
         return self.name == rhs.name
 
     def __ne__(self, rhs):
-        return not self.__eq__(rhs)    
+        return not self.__eq__(rhs)
 
     @property
     def name(self):
@@ -64,7 +67,7 @@ class Ring(object):
                 start = 0
             yield start
             n += 1
-            start += 1 
+            start += 1
 
     def _walk_ccw(self, start):
         """A generator that iterates all partitions backwards, starting at the partition provided"""
@@ -104,7 +107,7 @@ class Ring(object):
         return r
 
     def _swap(self, p1, p2):
-        """This swaps owner of p1 and p2"""        
+        """This swaps owner of p1 and p2"""
         n1 = self.partitions[p1]
         n2 = self.partitions[p2]
         n1.claim.remove(p1)
@@ -131,7 +134,7 @@ class Ring(object):
 
     def update_claim(self):
         # Check that all nodes have roughly the claim they wanted..
-        for n in self.nodes:            
+        for n in self.nodes:
             want = n.wanted or (self.num_partitions // len(self.nodes))
             if abs(len(n.claim)-want) > 3: # arbitrary thresholds ftw!
                 self.update_node(n, n.wanted)
@@ -234,7 +237,7 @@ class TestConsistentHashing(unittest.TestCase):
         for i in range(64):
             r.add_node(Node("node_%d"%i, 8080))
         self.assertTrue(r.ok())
-            
+
     def test_increase_node(self):
         n1 = Node("localhost", 8080)
         n2 = Node("apansson", 8080)
@@ -278,7 +281,7 @@ class TestConsistentHashing(unittest.TestCase):
         p = r.key_to_partition("foo")
         preferred, fallbacks = r.preferred("foo")
         self.assertEqual(len(preferred), 3)
-        self.assertTrue(p in preferred[0].claim)        
+        self.assertTrue(p in preferred[0].claim)
 
     def test_replicated(self):
         n = Node("localhost", 8080)
@@ -288,7 +291,7 @@ class TestConsistentHashing(unittest.TestCase):
         for i, n in enumerate(r.nodes):
             rep = r.replicated(n)
             self.assertEqual(rep & set(n.claim), set())
-        
+
 
 if __name__=="__main__":
     unittest.main()

@@ -1,3 +1,6 @@
+# Copyright (c) 2001-2010 Pär Bohrarper.
+# See LICENSE for details.
+
 import sqlite3
 import bsddb
 import unittest
@@ -14,9 +17,19 @@ class Store(object):
         raise NotImplementedError
 
     def get_iterator(self):
+        """
+        Does not need to return an actual iterator, 
+        just something that L{iterate} can recognize.
+        """  
         raise NotImplementedError
 
     def iterate(self, iterator, threshold):
+        """
+        Iterates over keys/values starting at iterator, until threshold bytes are accumulated.
+
+        @param iterator: Something that can describe the current position
+        @param threshold: How many bytes to accumulate before returning
+        """
         raise NotImplementedError
 
     def multi_put(self, kvlist, resolver):
@@ -29,7 +42,7 @@ class Store(object):
                 pass
             # TODO: probably should check if the value was changed...
             self.put(k, v)
-    
+
 
 class DictStore(Store):
     """Basic in-memory store."""
@@ -51,7 +64,7 @@ class DictStore(Store):
     def iterate(self, iterator, threshold):
         tot = 0
         ret = []
-        try:            
+        try:
             while tot < threshold:
                 k, v = iterator.next()
                 tot = tot + len(k) + len(v)
@@ -88,8 +101,8 @@ class BerkeleyDBStore(Store):
             return [], None
         iterator, v = self._store.set_location(iterator)
         tot = 0
-        ret = [(iterator, v)]        
-        try:            
+        ret = [(iterator, v)]
+        try:
             while tot < threshold:
                 iterator, v = self._store.next()
                 tot = tot + len(iterator) + len(v)
@@ -97,7 +110,7 @@ class BerkeleyDBStore(Store):
             return ret, iterator
         except bsddb.error as e:
             return ret, None
-        
+
 
 class SQLiteStore(Store):
     """Store that uses SQLite for storage."""
@@ -141,8 +154,8 @@ class SQLiteStore(Store):
 
     def iterate(self, iterator, threshold):
         tot = 0
-        ret = []        
-        try:            
+        ret = []
+        try:
             while tot < threshold:
                 k, v = iterator.next()
                 tot = tot + len(k) + len(v)

@@ -1,0 +1,7 @@
+Requirements
+
+    Tested on Python 2.5 and 2.6, may work on others
+
+Installation
+
+    python setup.py install

@@ -1,8 +1,11 @@
+# Copyright (c) 2001-2010 Pär Bohrarper.
+# See LICENSE for details.
+
 import time
 import unittest
 
 class VectorClock(object):
-    """A vector clock implementation. Each node's clock is stored as a 
+    """A vector clock implementation. Each node's clock is stored as a
     tuple: (clock, timestamp) in a dict with name as key. This means
     that the key needs to be hashable.
 
@@ -28,25 +31,36 @@ class VectorClock(object):
         return "\n".join(s)
 
     def clone(self):
+        """Returns a copy of the vector clock"""
         return VectorClock(dict(self._clocks))
 
     def prune(self):
+        """
+        This remove items so that it contains no items older than L{prune_age} 
+        and a maximum of L{prune_size} items.
+        """
         t = time.time()
-        newclocks = dict(((k, v) for v, k in 
+        newclocks = dict(((k, v) for v, k in
                           sorted(((v, k) for k, v in self._clocks.items()
                                   if t - v[0] > self.prune_age))[:self.prune_size]))
-        self._clocks = newclocks        
+        self._clocks = newclocks
         return self
 
     def increment(self, name):
+        """
+        Increments the vector clock for name.
+
+        @param name: A unique identifier
+        @type name: hashable
+        """
         try:
             timestamp, clock = self._clocks[name]
         except KeyError:
             clock = 0
         self._clocks[name] = (time.time(), clock+1)
         return self
-        
-    def __eq__(self, rhs):
+
+    def __eq__(self, rhs):      
         for name, v1 in rhs._clocks.items():
             try:
                 v2 = self._clocks[name]
@@ -63,6 +77,7 @@ class VectorClock(object):
         return not self.__eq__(rhs)
 
     def descends_from(self, rhs):
+        """Determines if rhs is an ancestor of self. Note that vc.descends_from(vc) returns True"""
         for name, v_r in rhs._clocks.items():
             try:
                 v_s = self._clocks[name]
@@ -77,6 +92,7 @@ class VectorClock(object):
 
 
 def merge(a, b):
+    """Merges the two vector clocks, using the latest version for each client"""
     newclocks = {}
     c_a = a._clocks
     c_b = b._clocks
@@ -103,10 +119,15 @@ def merge(a, b):
 
 def _joiner(a, b):
     return [a, b]
-            
+
 def resolve(a, b, joiner=_joiner):
     """Resolves the latest value for a and b,
     which should be a tuple of (VectorClock, value).
+
+    @param a: Tuple of L{VectorClock}, value
+    @param b: Tuple of L{VectorClock}, value
+    @param joiner: A function that takes the two values and produces a new value. The default joiner produces a list of the two values
+    @return: A tuple of the merged vector clock and the latest (possibly joined) value.
     """
     c_a, val_a = a
     c_b, val_b = b
@@ -122,6 +143,7 @@ def resolve(a, b, joiner=_joiner):
         return (newclock, joiner(val_a, val_b))
 
 def resolve_list(c, joiner=_joiner):
+    """Returns the latest/merged value from a list of L{VectorClock}, value tuples"""
     def _resolve(curr, rest):
         if not rest:
             return curr
@@ -132,16 +154,16 @@ def resolve_list(c, joiner=_joiner):
 def resolve_list_extend(list_):
     """Resolves the list of results to a unified result (which may be a list of concurrent versions)"""
     def joiner(a, b):
-        """This way of joining concurrent versions makes it possible 
-        to store concurrent versions as lists, while still being able 
+        """This way of joining concurrent versions makes it possible
+        to store concurrent versions as lists, while still being able
         to return a single list for a request
         """
         if not isinstance(a, list):
             a = [a]
         if not isinstance(b, list):
             b = [b]
-        return a + b              
-    return resolve_list(list_, joiner)        
+        return a + b
+    return resolve_list(list_, joiner)
 
 class TestVectorClock(unittest.TestCase):
     def test_empty_equals_empty(self):
@@ -151,7 +173,7 @@ class TestVectorClock(unittest.TestCase):
 
     def test_empty_descends_from_self(self):
         a = VectorClock()
-        self.assertTrue(a.descends_from(a))        
+        self.assertTrue(a.descends_from(a))
 
     def test_incremented_descends_from_empty(self):
         a = VectorClock()
@@ -199,4 +221,4 @@ class TestVectorClock(unittest.TestCase):
 
 if __name__=="__main__":
     unittest.main()
-        
+

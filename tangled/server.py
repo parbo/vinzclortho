@@ -1,3 +1,6 @@
+# Copyright (c) 2001-2010 Pär Bohrarper.
+# See LICENSE for details.
+
 from BaseHTTPServer import BaseHTTPRequestHandler
 import asynchat
 import asyncore
@@ -13,6 +16,16 @@ log = logging.getLogger("tangled.server")
 __version__ = "0.1"
 
 class Request(object):
+    """
+    The request object that gets passed to a handler in order to respond
+    to a request.
+
+    @var client_address: tuple of address, port
+    @var method: "GET", "PUT", etc.
+    @var path: The uri of the request, /foo/bar
+    @var data: The body of the request
+    @var groups: This contains the groups (if any) from the regex used when registering the request handler
+    """
     def __init__(self, client_address, method, path, headers, data, groups):
         self.client_address = client_address
         self.method = method
@@ -23,14 +36,23 @@ class Request(object):
 
 
 class Response(object):
+    """
+    The response object returned by a request handler.
+    """
     def __init__(self, code=None, headers=None, data=None):
+        """
+        @param code: A numeric HTTP status
+        @param headers: A dictionary containing header/content pairs
+        @param data: A str (or equivalent) containing the data
+        """
         self.code = code or 200
         self.headers = headers or {}
         self.data = data or ""
 
 
 class AsyncHTTPRequestHandler(asynchat.async_chat, BaseHTTPRequestHandler):
-    """An asynchronous HTTP request handler inspired somewhat by the 
+    """
+    An asynchronous HTTP request handler inspired somewhat by the
     http://code.activestate.com/recipes/440665-asynchronous-http-server/
     recipe.
     """
@@ -65,19 +87,20 @@ class AsyncHTTPRequestHandler(asynchat.async_chat, BaseHTTPRequestHandler):
         self.incoming.append(data)
 
     def create_rfile(self):
+        # BaseHTTPRequestHandler expects a file like object
         self.rfile = cStringIO.StringIO(''.join(self.incoming))
         self.incoming = []
         self.rfile.seek(0)
 
     def prepare_request(self):
-        """Prepare to read the request body"""
+        """Prepare for reading the request body"""
         bytesremaining = int(self.headers.getheader('content-length'))
         # set terminator to length (will read bytesremaining bytes)
         self.set_terminator(bytesremaining)
         self.incoming = []
         # control will be passed to a new found_terminator
         self.found_terminator = self.handle_request_data
-    
+
     def handle_junk(self):
         pass
 
@@ -91,6 +114,12 @@ class AsyncHTTPRequestHandler(asynchat.async_chat, BaseHTTPRequestHandler):
         self.handle_request()
 
     def finish_request(self, response):
+        """
+        Called with the request handler's response
+ 
+        @param response: The response to the request
+        @type response: L{Response}
+        """
         self.send_response(response.code)
         for k, v in response.headers.items():
             self.send_header(k, v)
@@ -118,7 +147,7 @@ class AsyncHTTPRequestHandler(asynchat.async_chat, BaseHTTPRequestHandler):
                     self.send_header("Content-Length", "%d"%len(response.data))
                 self.end_headers()
                 self.push(response.data)
-        
+
         self.close_when_done()
 
     def handle_request(self):
@@ -129,11 +158,11 @@ class AsyncHTTPRequestHandler(asynchat.async_chat, BaseHTTPRequestHandler):
                 try:
                     h = cls(self.server.context)
                     handler = getattr(h, "do_" + self.command)
-                    d = handler(Request(self.client_address, 
-                                        self.command, 
-                                        self.path, 
-                                        self.headers, 
-                                        self.rfile.read(), 
+                    d = handler(Request(self.client_address,
+                                        self.command,
+                                        self.path,
+                                        self.headers,
+                                        self.rfile.read(),
                                         m.groups()))
                     d.add_callback(self.finish_request)
                 except AttributeError:
@@ -141,12 +170,12 @@ class AsyncHTTPRequestHandler(asynchat.async_chat, BaseHTTPRequestHandler):
                     # Method not supported
                     self.send_header("Allow", ", ".join([method for method in self.methods if hasattr(h, "do_" + method)]))
                     self.send_error(405)
-                    self.end_headers()        
+                    self.end_headers()
                     self.close_when_done()
                 return
         # No match found, send 404
         self.send_error(404)
-        self.end_headers()        
+        self.end_headers()
         self.close_when_done()
 
     def handle_request_line(self):
@@ -163,7 +192,7 @@ class AsyncHTTPRequestHandler(asynchat.async_chat, BaseHTTPRequestHandler):
             self.handle_request()
 
     def log_message(self, format, *args):
-        log.info(format%args)
+        log.info(format, args)
 
     def request_handled(self, response):
         self.send_response(response.code)
@@ -180,10 +209,19 @@ class AsyncHTTPRequestHandler(asynchat.async_chat, BaseHTTPRequestHandler):
 
 
 class AsyncHTTPServer(asyncore.dispatcher):
-    """Cobbled together from various sources, most of them state that they 
-    copied from the Medusa http server.. 
+    """
+    Cobbled together from various sources, most of them state that they
+    copied from the Medusa http server..    
     """
     def __init__(self, address, context, urlhandlers):
+        """
+        @param address: Tuple of address, port
+        @param context: Something that gets passed to the handler's constructor for each request
+        @param urlhandlers: list of (regex, handler) tuples. 
+
+        A handler needs to have a constructor that accepts the context object, 
+        and a do_* method for each HTTP verb it wants to handle.
+        """
         self.context = context
         self.urlhandlers = [(re.compile(r), h) for r, h in urlhandlers]
         self.address = address
@@ -220,4 +258,4 @@ if __name__=="__main__":
             return core.succeed(Response(200, None, "elephant\ngiraffe\nlion"))
     server = AsyncHTTPServer(("localhost", 8080), None, [("/multipart", MultiPartHandler), ("/normal", NormalHandler)])
     asyncore.loop()
-                                                         
+

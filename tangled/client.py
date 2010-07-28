@@ -1,3 +1,6 @@
+# Copyright (c) 2001-2010 Pär Bohrarper.
+# See LICENSE for details.
+
 import asyncore
 import socket
 import urlparse
@@ -9,6 +12,9 @@ import logging
 log = logging.getLogger("tangled.client")
 
 class Response(object):
+    """
+    This is the response object returned by L{AsyncHTTPClient}. 
+    """
     def __init__(self, addr):
         self.data = ""
         self.header = ""
@@ -29,11 +35,12 @@ class Response(object):
         try:
             self.reason = status[2]
         except IndexError:
-            self.reason = ""        
+            self.reason = ""
 
 
 class AsyncHTTPClient(asyncore.dispatcher_with_send):
-    """Asynchronous HTTP client, based on 
+    """
+    Asynchronous HTTP client, based on
     http://effbot.org/librarybook/SimpleAsyncHTTP.py
     """
     def __init__(self, url, command="GET", data="", consumer=None):
@@ -50,7 +57,7 @@ class AsyncHTTPClient(asyncore.dispatcher_with_send):
         try:
             port = int(addr[1])
         except IndexError:
-            port = 80        
+            port = 80
         self.consumer = consumer
         if self.consumer is None:
             self.consumer = Response((host, port))
@@ -79,7 +86,7 @@ class AsyncHTTPClient(asyncore.dispatcher_with_send):
         self._result.callback(self.response)
 
     def handle_read(self):
-        data = self.recv(2048)        
+        data = self.recv(2048)
         if not self.header:
             self.data = self.data + data
             i = self.data.find("\r\n\r\n")
@@ -108,6 +115,10 @@ class AsyncHTTPClient(asyncore.dispatcher_with_send):
         self._result.callback(self.response)
 
 def request(url, command="GET", data=""):
+    """
+    Helper function to make a request without needing
+    to know about L{AsyncHTTPClient}.
+    """
     c = AsyncHTTPClient(url, command, data)
     return c.request()
 
@@ -120,7 +131,7 @@ if __name__=="__main__":
                       help="Number of connections")
     parser.add_option("-c", "--concurrent", dest="concurrent", type="int",
                       help="Number of concurrent connections")
-    parser.add_option("-p", "--printresponse", dest="printresponse", action="store_true", default=False, 
+    parser.add_option("-p", "--printresponse", dest="printresponse", action="store_true", default=False,
                       help="Number of concurrent connections")
 
     (options, args) = parser.parse_args()
