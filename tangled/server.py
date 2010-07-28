@@ -15,7 +15,7 @@ import uuid
 import logging
 log = logging.getLogger("tangled.server")
 
-__version__ = "0.1.1"
+__version__ = "0.1.1.2"
 
 class Request(object):
     """
@@ -194,7 +194,7 @@ class AsyncHTTPRequestHandler(asynchat.async_chat, BaseHTTPRequestHandler):
             self.handle_request()
 
     def log_message(self, format, *args):
-        log.info(format, args)
+        log.info(format, *args)
 
     def request_handled(self, response):
         self.send_response(response.code)

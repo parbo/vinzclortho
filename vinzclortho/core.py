@@ -206,6 +206,9 @@ class StoreHandler(object):
     def _read_repair(self, result):
         if len(self.results) + len(self.failed) == len(self.replicas):
             resolved = self._resolve()
+            if resolved is None:
+                # No replicas probably
+                return
             vc_final, value_final = resolved
             for replica, result in self.results:
                 vc, value = result
@@ -215,7 +218,6 @@ class StoreHandler(object):
             for replica, result in self.failed:
                 log.info("Read-repair of failed node %s", replica)
                 d = replica.put(self.key, self._encode(vc_final, value_final))
-        return result
 
     def _read_quorum_acheived(self):
         return len(self.results) >= self.R
@@ -262,7 +264,6 @@ class StoreHandler(object):
         self.failed.append((replica, result))
         if self._all_received():
             self._respond_error()
-        return result
 
     def do_GET(self, request):
         self.response = tc.Deferred()
@@ -346,8 +347,15 @@ class HandoffHandler(object):
 
 class AdminHandler(object):
     """
-    The request handler for requests to /admin. Currently, only /admin/claim is available.
+    The request handler for requests to /admin. Currently, these services are available:
+
+    /admin/claim
+
     The number of partitions claimed by a node can be read/written using this.
+
+    /admin/balance
+
+    A PUT to this will make the node try to rebalance the claim of the nodes.
     """
     def __init__(self, context):
         self.context = context
@@ -381,14 +389,14 @@ class VinzClortho(object):
     """
     gossip_interval=30.0
     N=3
-    num_partitions=1024
+    num_partitions=512
     worker_pool_size=10
     def __init__(self, addr, join, claim, partitions, logfile, persistent):
         # Setup logging
         logfile = logfile or "vc_log_" + addr + ".log"
         logging.basicConfig(level=logging.DEBUG,
                             format='%(asctime)s %(name)-12s %(levelname)-8s %(message)s',
-                            datefmt='%m-%d %H:%M',
+                            datefmt='%Y-%m-%d %H:%M:%S',
                             filename=logfile,
                             filemode='a')
         # define a Handler which writes WARNING messages or higher to the sys.stderr
@@ -570,7 +578,7 @@ class VinzClortho(object):
     def get_gossip(self, a=None):
         address = a or self.random_other_node_address()
         if address is not None:
-            log.debug("Gossip with", address)
+            log.debug("Gossip with %s", address)
             d = tangled.client.request("http://%s:%d/_metadata"%address)
             d.add_callbacks(functools.partial(self.gossip_received, address), self.gossip_error)
             return d
@@ -637,13 +645,13 @@ def main():
                       help="Bind to ADDRESS", metavar="ADDRESS")
     parser.add_option("-c", "--claim", dest="claim",
                       help="Number of partitions to claim")
-    parser.add_option("-p", "--partitions", dest="partitions",
+    parser.add_option("-p", "--partitions", dest="partitions", type="int",
                       help="Number of partitions in the hash ring")
     parser.add_option("-l", "--logfile", dest="logfile", metavar="FILE",
                       help="Use FILE as logfile")
     (options, args) = parser.parse_args()
 
-    vc = VinzClortho(options.address, options.join, options.claim, options.partition, options.logfile, True)
+    vc = VinzClortho(options.address, options.join, options.claim, options.partitions, options.logfile, True)
     vc.run()
 
 if __name__ == '__main__':

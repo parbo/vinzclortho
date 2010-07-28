@@ -155,6 +155,11 @@ def resolve_list(c, joiner=_joiner):
 
 def resolve_list_extend(list_):
     """Resolves the list of results to a unified result (which may be a list of concurrent versions)"""
+    if not list_:
+        return None
+    if len(list_) == 1:
+        return list_[0]
+
     def joiner(a, b):
         """This way of joining concurrent versions makes it possible
         to store concurrent versions as lists, while still being able

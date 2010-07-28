@@ -153,7 +153,7 @@ class Ring(object):
         """This will set the number of claimed partitions to 'claim'
         by stealing/giving partitions at random
         """
-        log.info("Updating node %s %s %s", node, claim, force)
+        log.info("Updating node %s with claim %s (%s) of %s. Force=%s", node, claim, (self.num_partitions // len(self.nodes)), self.num_partitions, force)
         node.wanted = claim
         claim = claim or (self.num_partitions // len(self.nodes))
         unwanted = self.unwanted(node.claim)
@@ -195,6 +195,7 @@ class Ring(object):
     def add_node(self, node, claim=None):
         assert node not in self.nodes
         self.nodes.append(node)
+        log.info("Node %s added, ring now has %d nodes.", node, len(self.nodes))
         self.N = min(len(self.nodes), self._wanted_N)
         self.update_node(node, claim)
         if not self.ok():
@@ -203,6 +204,7 @@ class Ring(object):
     def remove_node(self, node):
         self.update_node(node, 0, True)
         del self.nodes[self.nodes.index(node)]
+        log.info("Node %s added, ring now has %d nodes.", node, len(self.nodes))
         self.N = min(len(self.nodes), self._wanted_N)
         if not self.ok():
             self.fix_constraint()

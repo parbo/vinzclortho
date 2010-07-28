@@ -4,7 +4,7 @@
 from distutils.core import setup
 
 setup(name='VinzClortho',
-      version='0.1.1',
+      version='0.1.1.2',
       description='A distributed key/value-store, also known as a NOSQL database.',
       author='Pär Bohrarper',
       author_email='par.bohrarper@gmail.com',

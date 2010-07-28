@@ -13,11 +13,12 @@ import sys
 import time
 import heapq
 import select
+import traceback
 
 import logging
 log = logging.getLogger("tangled.core")
 
-__version__ = "0.1.1"
+__version__ = "0.1.1.2"
 
 def succeed(r):
     """Syntactic sugar for making a synchronous call look asynchronous"""
@@ -102,7 +103,7 @@ class Failure(object):
             self.tb = None
 
     def __str__(self):
-        return "%s %s %s"%(self.type, self.value, self.tb)
+        return repr(traceback.format_exception(self.type, self.value, self.tb))
 
     def raise_exception(self):
         """Re-raises the exception"""
