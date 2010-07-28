@@ -17,7 +17,7 @@ import select
 import logging
 log = logging.getLogger("tangled.core")
 
-__version__ = "0.1"
+__version__ = "0.1.1"
 
 def succeed(r):
     """Syntactic sugar for making a synchronous call look asynchronous"""

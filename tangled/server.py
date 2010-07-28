@@ -15,7 +15,7 @@ import uuid
 import logging
 log = logging.getLogger("tangled.server")
 
-__version__ = "0.1"
+__version__ = "0.1.1"
 
 class Request(object):
     """
