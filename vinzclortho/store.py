@@ -95,7 +95,7 @@ class BerkeleyDBStore(Store):
         try:
             k, v = self._store.first()
             return k
-        except bsddb.error as e:
+        except bsddb.error:
             return None
 
     def iterate(self, iterator, threshold):
@@ -110,7 +110,7 @@ class BerkeleyDBStore(Store):
                 tot = tot + len(iterator) + len(v)
                 ret.append((iterator, v))
             return ret, iterator
-        except bsddb.error as e:
+        except bsddb.error:
             return ret, None
 
 
