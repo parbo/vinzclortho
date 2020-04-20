@@ -6,14 +6,14 @@ Vinz Clortho was was written by me as part of the recruitment process at a well 
 I have not tested this under any serious loads, so please use with caution.
 
 ### What is it?
-It is a distributed key-value store (or a NOSQL database if you will) with an HTTP API. It is implemented in pure Python without any additional dependencies. It is inspired by [[http://www.allthingsdistributed.com/2007/10/amazons_dynamo.html|Amazon's Dynamo paper]] and of other open source Dynamo clones, but mostly by [[https://wiki.basho.com/display/RIAK/Riak|Riak]].
+It is a distributed key-value store (or a NOSQL database if you will) with an HTTP API. It is implemented in pure Python without any additional dependencies. It is inspired by [Amazon's Dynamo paper](http://www.allthingsdistributed.com/2007/10/amazons_dynamo.html) and of other open source Dynamo clones, but mostly by [Riak](https://wiki.basho.com/display/RIAK/Riak).
 
 ### Features
 * Distributed key-value store. Keys and values can be any data.
 * RESTful HTTP API
 * No SPOF, all nodes are equal in the cluster
 * Consistent hashing is used to be able to add nodes with a minimum of key ownership change
-* Data is replicated on N nodes, quorum reads (R) and writes (W) are used to provide the desired level of consistency. Currently, N=3, R=2, W=2 is hardwired. This setting provides read-your-writes consistency (since R+W > N, see the [[http://www.allthingsdistributed.com/2007/10/amazons_dynamo.html|Dynamo paper]]). It also means that one replica can be down without affecting availability. 
+* Data is replicated on N nodes, quorum reads (R) and writes (W) are used to provide the desired level of consistency. Currently, N=3, R=2, W=2 is hardwired. This setting provides read-your-writes consistency (since R+W > N, see the [Dynamo paper](http://www.allthingsdistributed.com/2007/10/amazons_dynamo.html)). It also means that one replica can be down without affecting availability. 
 * Vector clocks for versioning of values and cluster metadata
 * Read-repair of stale/missing data to recover from transient unavailability of nodes
 * Gossip protocol for cluster membership and metadata
@@ -34,13 +34,13 @@ It is a distributed key-value store (or a NOSQL database if you will) with an HT
 ### Design
 * Any node can handle a request, just put any load balancer between the cluster and your application
 * All communication uses HTTP (so that I didn't have to write multiple clients/servers)
-* Consistent hashing is implemented using fixed-size partitions, to facilitate transfer of data when nodes are added. (Called strategy 3 in the [[http://www.allthingsdistributed.com/2007/10/amazons_dynamo.html|Dynamo paper]].)
+* Consistent hashing is implemented using fixed-size partitions, to facilitate transfer of data when nodes are added. (Called strategy 3 in the [Dynamo paper](http://www.allthingsdistributed.com/2007/10/amazons_dynamo.html).)
 * SHA1 hash is used for consistent hashing. Keys with the same hash are considered the same. SHA1 is 160 bits, so the likelihood of a collision is very small. 
-* Gossip protocol is used for membership, which should scale up to a couple of hundred nodes //(citation needed)//.
+* Gossip protocol is used for membership, which should scale up to a couple of hundred nodes _(citation needed)_.
 * Both client and server are single threaded and asynchronous (implemented on top of asyncore/asynchat). The calls to the underlying db's are handled by a thread pool. The code uses the "deferred"-concept of chained callbacks, borrowed from Twisted.
 
 ### HTTP API
-This is heavily influenced by the [[https://wiki.basho.com/display/RIAK/REST+API|Riak API]].
+This is heavily influenced by the [Riak API](https://wiki.basho.com/display/RIAK/REST+API).
 
 #### Store API
 
@@ -148,7 +148,7 @@ A four node cluster on my fairly recent four core AMD machine seem to be able to
 
 The cluster should scale linearly with size, just add more nodes for more storage and more requests per second. Caveat: the partition size cannot be changed, so you must choose this value to be >> than the maximum number of nodes you foresee in your cluster.
 
-Note that the time to disseminate membership metadata is O(log n) due to the gossip protocol. The bandwidth used for gossiping grows linearly with cluster size. This means that you probably should consider some other solution if you need more than a couple of hundred nodes. (Or ask me to implement [[http://en.wikipedia.org/wiki/Chord_(peer-to-peer)|Chord]] or [[http://en.wikipedia.org/wiki/Kademlia|Kademlia]] in Vinz Clortho)
+Note that the time to disseminate membership metadata is O(log n) due to the gossip protocol. The bandwidth used for gossiping grows linearly with cluster size. This means that you probably should consider some other solution if you need more than a couple of hundred nodes. (Or ask me to implement [Chord](http://en.wikipedia.org/wiki/Chord_(peer-to-peer)) or [Kademlia](http://en.wikipedia.org/wiki/Kademlia) in Vinz Clortho)
 
 **Example:** use Vinz Clortho to store user created playlists.
 
@@ -160,9 +160,9 @@ Playlists are assumed to be a list of keys into another Vinz Clortho cluster tha
 
 This amounts to 250 * 5000000 = 1250000000 requests per day. This is 14467 requests per seconds. This could be handled by 48 nodes serving 300 req/s each. It is probably wise to use a 64 node cluster in this case, since requests are probably not uniformly distributed during the day. Such a cluster should be able to handle 19200 to 32000 requests per second.
 
-Note that this assumes that a load balancer is put in front of the cluster. [[http://blog.rightscale.com/2010/04/01/benchmarking-load-balancers-in-the-cloud/|This test]] seems to indicate that an EC2 cluster with Amazon's ELB balancer should be able to handle that amount of requests.
+Note that this assumes that a load balancer is put in front of the cluster. [This test](http://blog.rightscale.com/2010/04/01/benchmarking-load-balancers-in-the-cloud/) seems to indicate that an EC2 cluster with Amazon's ELB balancer should be able to handle that amount of requests.
 
 The storage needed is 5000000 * 20 * 1KB ~ 100 GB, which is just 1.6 GB per node. Note that due to replication it would be almost 5 GB of storage per node. Still, it's peanuts. It may also mean that the databases are cached in RAM which should be good for read performance.
 
 ### Why Vinz Clortho?
-Isn't it obvious? Vinz Clortho is the [[http://www.gbfans.com/ghostbusters/characters/keymaster/|keymaster]] demon in Ghostbusters.
+Isn't it obvious? Vinz Clortho is the [keymaster](http://www.gbfans.com/ghostbusters/characters/keymaster/) demon in Ghostbusters.
