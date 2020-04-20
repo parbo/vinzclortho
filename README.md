@@ -49,9 +49,9 @@ This is heavily influenced by the [[https://wiki.basho.com/display/RIAK/REST+API
 `GET /store/mykey`
 
 Responses: 
-*200 OK
-*300 Multiple Choices
-*404 Not Found - the object could not be found (on enough partitions)
+* `200 OK`
+* `300 Multiple Choices`
+* `404 Not Found` - the object could not be found (on enough partitions)
 
 Important headers:
 *X-VinzClortho-Context - An opaque context object that should be provided on subsequent Put or Delete operations
@@ -61,14 +61,14 @@ If the response status is 300, then there are concurrent versions of the value. 
 `PUT /store/mykey`
 
 Responses: 
-*200 OK
-*404 Not Found - the object could not be found (on enough partitions)
+* `200 OK`
+* `404 Not Found` - the object could not be found (on enough partitions)
 
 `DELETE /store/mykey`
 
 Responses: 
-*200 OK
-*404 Not Found - the object could not be found (on enough partitions)
+* `200 OK`
+* `404 Not Found` - the object could not be found (on enough partitions)
 
 _Note: PUSH is a synonym for PUT_
 
@@ -76,15 +76,15 @@ _Note: PUSH is a synonym for PUT_
 `GET /admin/claim`
 
 Responses: 
-*200 OK
+* `200 OK`
 
 The body is the number of partitions claimed by the node
 
 `PUT /admin/claim`
 
 Responses: 
-*200 OK
-*400 Bad Request - the data was not a string that could be converted to an integer
+* `200 OK`
+* `400 Bad Request` - the data was not a string that could be converted to an integer
 
 Sets the wanted claim to the value in the body. Note that the actual claim may become something else due to replication constraints. Read it with GET.
 
