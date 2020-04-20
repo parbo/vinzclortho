@@ -46,7 +46,7 @@ This is heavily influenced by the [[https://wiki.basho.com/display/RIAK/REST+API
 
 **Note:** All requests to /store should include a X-VinzClortho-ClientId header. This can be any string that uniquely identifies the client. It is used in the vector clock of a value to track versions.
 
-{{{GET /store/mykey}}}
+`GET /store/mykey`
 
 Responses: 
 *200 OK
@@ -58,29 +58,29 @@ Important headers:
 
 If the response status is 300, then there are concurrent versions of the value. Each version is provided as one part of a multipart/mixed response. The client is responsible for reconciling the versions.
 
-{{{PUT /store/mykey}}}
+`PUT /store/mykey`
 
 Responses: 
 *200 OK
 *404 Not Found - the object could not be found (on enough partitions)
 
-{{{DELETE /store/mykey}}}
+`DELETE /store/mykey`
 
 Responses: 
 *200 OK
 *404 Not Found - the object could not be found (on enough partitions)
 
-//Note: PUSH is a synonym for PUT//
+_Note: PUSH is a synonym for PUT_
 
 #### Admin API
-{{{GET /admin/claim}}}
+`GET /admin/claim`
 
 Responses: 
 *200 OK
 
 The body is the number of partitions claimed by the node
 
-{{{PUT /admin/claim}}}
+`PUT /admin/claim`
 
 Responses: 
 *200 OK
@@ -92,25 +92,26 @@ Sets the wanted claim to the value in the body. Note that the actual claim may b
 
 The internal communication between nodes also uses HTTP. The internal uri's all start with an underscore. Don't call these yourself.
 
-{{{
+```
 /_localstore/mykey
 /_handoff
 /_metadata
-}}} 
+``` 
 
 ### Installation
-Download and unpack, then issue this command (as root or using sudo):\\
-{{{python setup.py install}}}
+Download and unpack, then issue this command (as root or using sudo): 
+
+    python setup.py install
 
 === Setting up a cluster, an example
 This example sets up an 8 node cluster with 1024 partitions on a local machine
-Starting the first node:\\
-{{{
-vinzclortho -a mymachine:8880 -p 1024 &
-}}}
+Starting the first node:
 
-Starting subsequent nodes:\\
-{{{
+    vinzclortho -a mymachine:8880 -p 1024 &
+
+Starting subsequent nodes:
+
+```
 vinzclortho -a mymachine:8881 -j mymachine_1:8880 &
 vinzclortho -a mymachine:8882 -j mymachine_1:8880 &
 vinzclortho -a mymachine:8883 -j mymachine_1:8880 &
@@ -118,13 +119,13 @@ vinzclortho -a mymachine:8884 -j mymachine_1:8880 &
 vinzclortho -a mymachine:8885 -j mymachine_1:8880 &
 vinzclortho -a mymachine:8886 -j mymachine_1:8880 &
 vinzclortho -a mymachine:8887 -j mymachine_1:8880 &
-}}}
+```
 
 Note that the databases and log files will appear in the directory where you issued the vinzclortho command, and will be named vc_store_partition_address:port.db and vc_log_address:port.log.
 
-Test that it works:\\
+Test that it works:
 
-{{{
+```
 me@mymachine:~$ curl -i -X PUT -d "testvalue" -H "X-VinzClortho-ClientID: myclientid" http://mymachine:8883/store/testkey
 HTTP/1.1 200 OK
 Server: Tangled/0.1 Python/2.6.5
@@ -138,7 +139,7 @@ X-VinzClortho-Context: QlpoOTFBWSZTWaRkmXoAACXfgAAQAMF/4AkhGQCev98gIABkRMj1KPTRq
 Content-Length: 9
 
 testvalue
-}}}
+```
 
 === Performance and scalability estimates
 I haven't been able to test this using a physical machine for each node, so my numbers may be off. I have signed up for an AWS account to test with an EC2 cluster, but haven't had the time yet.
