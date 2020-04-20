@@ -44,7 +44,7 @@ This is heavily influenced by the [Riak API](https://wiki.basho.com/display/RIAK
 
 #### Store API
 
-**Note:** All requests to /store should include a X-VinzClortho-ClientId header. This can be any string that uniquely identifies the client. It is used in the vector clock of a value to track versions.
+**Note:** All requests to `/store` should include a `X-VinzClortho-ClientId` header. This can be any string that uniquely identifies the client. It is used in the vector clock of a value to track versions.
 
 `GET /store/mykey`
 
@@ -54,9 +54,9 @@ Responses:
 * `404 Not Found` - the object could not be found (on enough partitions)
 
 Important headers:
-*X-VinzClortho-Context - An opaque context object that should be provided on subsequent Put or Delete operations
+* `X-VinzClortho-Context` - An opaque context object that should be provided on subsequent `PUT` or `DELETE` operations
 
-If the response status is 300, then there are concurrent versions of the value. Each version is provided as one part of a multipart/mixed response. The client is responsible for reconciling the versions.
+If the response status is `300`, then there are concurrent versions of the value. Each version is provided as one part of a multipart/mixed response. The client is responsible for reconciling the versions.
 
 `PUT /store/mykey`
 
@@ -86,7 +86,7 @@ Responses:
 * `200 OK`
 * `400 Bad Request` - the data was not a string that could be converted to an integer
 
-Sets the wanted claim to the value in the body. Note that the actual claim may become something else due to replication constraints. Read it with GET.
+Sets the wanted claim to the value in the body. Note that the actual claim may become something else due to replication constraints. Read it with `GET`.
 
 #### Internal API
 
@@ -103,7 +103,7 @@ Download and unpack, then issue this command (as root or using sudo):
 
     python setup.py install
 
-=== Setting up a cluster, an example
+### Setting up a cluster, an example
 This example sets up an 8 node cluster with 1024 partitions on a local machine
 Starting the first node:
 
@@ -121,7 +121,7 @@ vinzclortho -a mymachine:8886 -j mymachine_1:8880 &
 vinzclortho -a mymachine:8887 -j mymachine_1:8880 &
 ```
 
-Note that the databases and log files will appear in the directory where you issued the vinzclortho command, and will be named vc_store_partition_address:port.db and vc_log_address:port.log.
+Note that the databases and log files will appear in the directory where you issued the `vinzclortho` command, and will be named `vc_store_partition_address:port.db` and `vc_log_address:port.log`.
 
 Test that it works:
 
@@ -141,7 +141,7 @@ Content-Length: 9
 testvalue
 ```
 
-=== Performance and scalability estimates
+### Performance and scalability estimates
 I haven't been able to test this using a physical machine for each node, so my numbers may be off. I have signed up for an AWS account to test with an EC2 cluster, but haven't had the time yet.
 
 A four node cluster on my fairly recent four core AMD machine seem to be able to handle 300-500 requests per second (tested with small keys and values) to one node. It handles about 1000 raw requests per node, and due to quorum reads each request becomes 3-4 requests depending on if the node taking the request is the owner of the key or not.
@@ -154,9 +154,9 @@ Note that the time to disseminate membership metadata is O(log n) due to the gos
 
 Playlists are assumed to be a list of keys into another Vinz Clortho cluster that stores the song metadata, plus some metadata (the time a song was added etc.). It should fit in about a kilobyte per playlist.
 
-*Number of users: 5 million
-*Number of playlists per user (on average): 20
-*Number of playlists views/edits per user per day: 250 (10 or so views of the user page per day times 20 playlists plus a number of songs added to playlists every day)
+* Number of users: 5 million
+* Number of playlists per user (on average): 20
+* Number of playlists views/edits per user per day: 250 (10 or so views of the user page per day times 20 playlists plus a number of songs added to playlists every day)
 
 This amounts to 250 * 5000000 = 1250000000 requests per day. This is 14467 requests per seconds. This could be handled by 48 nodes serving 300 req/s each. It is probably wise to use a 64 node cluster in this case, since requests are probably not uniformly distributed during the day. Such a cluster should be able to handle 19200 to 32000 requests per second.
 
