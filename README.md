@@ -1,14 +1,14 @@
-== Vinz Clortho
+## Vinz Clortho
 
-=== Warning - not for production use
+### Warning - not for production use
 Vinz Clortho was was written by me as part of the recruitment process at a well known company providing streaming media services. Their programming test was to write a distributed key-value store accessible over HTTP. Yes, they seem serious about finding people who are actually able to program stuff.
 
 I have not tested this under any serious loads, so please use with caution.
 
-=== What is it?
+### What is it?
 It is a distributed key-value store (or a NOSQL database if you will) with an HTTP API. It is implemented in pure Python without any additional dependencies. It is inspired by [[http://www.allthingsdistributed.com/2007/10/amazons_dynamo.html|Amazon's Dynamo paper]] and of other open source Dynamo clones, but mostly by [[https://wiki.basho.com/display/RIAK/Riak|Riak]].
 
-=== Features
+### Features
 * Distributed key-value store. Keys and values can be any data.
 * RESTful HTTP API
 * No SPOF, all nodes are equal in the cluster
@@ -21,7 +21,7 @@ It is a distributed key-value store (or a NOSQL database if you will) with an HT
 * Multiple store types available (in memory, Berkeley DB, SQLite). Currently you have to patch the source to change it though, Berkeley DB is used by default.
 * The nodes can be heterogenous in capacity, since each node's claim on the consistent hash ring is tunable
 
-=== Deficiencies / bugs
+### Deficiencies / bugs
 * Nodes can't leave the cluster. They can set their claim so that they don't handle any data, but not leave.
 * Replication factor is hardwired to 3
 * Quorums are not tunable
@@ -31,7 +31,7 @@ It is a distributed key-value store (or a NOSQL database if you will) with an HT
 * Failure of nodes is not gossiped to other nodes
 * The stored vector clocks are never pruned
 
-=== Design
+### Design
 * Any node can handle a request, just put any load balancer between the cluster and your application
 * All communication uses HTTP (so that I didn't have to write multiple clients/servers)
 * Consistent hashing is implemented using fixed-size partitions, to facilitate transfer of data when nodes are added. (Called strategy 3 in the [[http://www.allthingsdistributed.com/2007/10/amazons_dynamo.html|Dynamo paper]].)
@@ -39,10 +39,10 @@ It is a distributed key-value store (or a NOSQL database if you will) with an HT
 * Gossip protocol is used for membership, which should scale up to a couple of hundred nodes //(citation needed)//.
 * Both client and server are single threaded and asynchronous (implemented on top of asyncore/asynchat). The calls to the underlying db's are handled by a thread pool. The code uses the "deferred"-concept of chained callbacks, borrowed from Twisted.
 
-=== HTTP API
+### HTTP API
 This is heavily influenced by the [[https://wiki.basho.com/display/RIAK/REST+API|Riak API]].
 
-==== Store API
+#### Store API
 
 **Note:** All requests to /store should include a X-VinzClortho-ClientId header. This can be any string that uniquely identifies the client. It is used in the vector clock of a value to track versions.
 
@@ -72,7 +72,7 @@ Responses:
 
 //Note: PUSH is a synonym for PUT//
 
-====Admin API
+#### Admin API
 {{{GET /admin/claim}}}
 
 Responses: 
@@ -88,7 +88,7 @@ Responses:
 
 Sets the wanted claim to the value in the body. Note that the actual claim may become something else due to replication constraints. Read it with GET.
 
-==== Internal API
+#### Internal API
 
 The internal communication between nodes also uses HTTP. The internal uri's all start with an underscore. Don't call these yourself.
 
@@ -98,7 +98,7 @@ The internal communication between nodes also uses HTTP. The internal uri's all 
 /_metadata
 }}} 
 
-=== Installation
+### Installation
 Download and unpack, then issue this command (as root or using sudo):\\
 {{{python setup.py install}}}
 
@@ -163,5 +163,5 @@ Note that this assumes that a load balancer is put in front of the cluster. [[ht
 
 The storage needed is 5000000 * 20 * 1KB ~ 100 GB, which is just 1.6 GB per node. Note that due to replication it would be almost 5 GB of storage per node. Still, it's peanuts. It may also mean that the databases are cached in RAM which should be good for read performance.
 
-=== Why Vinz Clortho?
+### Why Vinz Clortho?
 Isn't it obvious? Vinz Clortho is the [[http://www.gbfans.com/ghostbusters/characters/keymaster/|keymaster]] demon in Ghostbusters.
